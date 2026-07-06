@@ -51,7 +51,7 @@ st.markdown("""
 
 
 def get_conn():
-    conn = sqlite3.connect("l_and_p_freight.db", check_same_thread=False)
+    conn = sqlite3.connect("lp_dispatch.db", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -386,7 +386,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Leads & Follow
 with tab1:
     st.subheader("Dashboard — Today’s Snapshot")
     
-    conn = sqlite3.connect("l_and_p_freight.db")
+    conn = get_conn()
     leads_df = pd.read_sql("SELECT * FROM leads", conn)
     loads_df = pd.read_sql("SELECT * FROM loads", conn)
     conn.close()
@@ -437,7 +437,7 @@ with tab1:
 with tab2:
     st.subheader("Leads CRM + Automated Follow-up Sequences")
     
-    conn = sqlite3.connect("l_and_p_freight.db")
+    conn = get_conn()
     leads_df = pd.read_sql("SELECT * FROM leads", conn)
     conn.close()
     
@@ -461,7 +461,7 @@ with tab2:
         f_type = st.selectbox("Follow-up Method", ["Phone Call", "Text", "Email", "Send Quote"])
     
     if st.button("Save Update & Schedule Follow-up"):
-        conn = sqlite3.connect("l_and_p_freight.db")
+        conn = get_conn()
         c = conn.cursor()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         combined = f"[{ts}] {new_note}\n{row['notes']}" if new_note else row['notes']
@@ -476,7 +476,7 @@ with tab2:
 with tab3:
     st.subheader("Log Load + Track Empty Return Miles")
     
-    conn = sqlite3.connect("l_and_p_freight.db")
+    conn = get_conn()
     leads = pd.read_sql("SELECT id, name FROM leads", conn)
     conn.close()
     
@@ -522,7 +522,7 @@ with tab3:
     notes = st.text_area("Notes")
     
     if st.button("Log Load with Deadhead"):
-        conn = sqlite3.connect("l_and_p_freight.db")
+        conn = get_conn()
         c = conn.cursor()
         bol = f"LP-{datetime.now().strftime('%Y%m%d%H%M')}"
         c.execute("""INSERT INTO loads (lead_id, load_date, commodity, weight_tons, rate_per_ton, total_revenue, loaded_miles, empty_miles, bol_number, notes, asset_id)
@@ -562,7 +562,7 @@ with tab4:
 # ========== BILLING & DRIVER PAY ==========
 with tab5:
     st.subheader("Billing & Driver Pay")
-    conn = sqlite3.connect("l_and_p_freight.db")
+    conn = get_conn()
     
     with st.expander("Asset / Pay Profile Manager", expanded=False):
         st.caption("Define trucks, trailers, or combos with per-mile rates.")
@@ -787,7 +787,7 @@ with tab5:
         if selected_label != "— select —":
             sid = int(selected_label.split(" — ")[0].replace("#", ""))
             srow = setts[setts['id'] == sid].iloc[0]
-            conn_load = sqlite3.connect("l_and_p_freight.db")
+            conn_load = get_conn()
             loads_all = pd.read_sql("SELECT * FROM loads ORDER BY pickup_date DESC", conn_load)
             conn_load.close()
             lrow = loads_all[loads_all['id'] == srow['load_id']].iloc[0] if not loads_all.empty else {}

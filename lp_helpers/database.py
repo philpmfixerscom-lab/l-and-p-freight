@@ -317,6 +317,99 @@ CREATE TABLE IF NOT EXISTS opportunities (
     created_at TEXT DEFAULT (datetime('now')),
     refreshed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    loaded_rate_per_mile REAL NOT NULL DEFAULT 0.0,
+    empty_rate_per_mile REAL NOT NULL DEFAULT 0.0,
+    status TEXT DEFAULT 'Active',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    load_id INTEGER NOT NULL,
+    asset_id INTEGER,
+    driver_name TEXT,
+    planned_loaded_miles REAL NOT NULL,
+    actual_loaded_miles REAL NOT NULL,
+    planned_empty_miles REAL NOT NULL,
+    actual_empty_miles REAL NOT NULL,
+    loaded_rate REAL NOT NULL,
+    empty_rate REAL NOT NULL,
+    bonuses REAL DEFAULT 0.0,
+    deductions REAL DEFAULT 0.0,
+    accessorials REAL DEFAULT 0.0,
+    total_pay REAL NOT NULL,
+    variance_pct REAL,
+    status TEXT DEFAULT 'Draft',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (load_id) REFERENCES loads(id),
+    FOREIGN KEY (asset_id) REFERENCES assets(id)
+);
+
+CREATE TABLE IF NOT EXISTS routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    load_id INTEGER NOT NULL,
+    waypoints TEXT NOT NULL,
+    planned_loaded_miles REAL NOT NULL,
+    planned_empty_miles REAL NOT NULL,
+    google_miles REAL,
+    actual_loaded_miles REAL,
+    actual_empty_miles REAL,
+    source TEXT DEFAULT 'planned',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (load_id) REFERENCES loads(id)
+);
+
+CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact_name TEXT,
+    phone TEXT,
+    email TEXT,
+    api_key TEXT UNIQUE,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    po_number TEXT UNIQUE NOT NULL,
+    status TEXT DEFAULT 'Open',
+    total_estimated_revenue REAL DEFAULT 0.0,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+CREATE TABLE IF NOT EXISTS po_loads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    po_id INTEGER NOT NULL,
+    load_id INTEGER,
+    sequence INTEGER DEFAULT 1,
+    scheduled_pickup_date TEXT,
+    scheduled_delivery_date TEXT,
+    status TEXT DEFAULT 'Scheduled',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (po_id) REFERENCES purchase_orders(id),
+    FOREIGN KEY (load_id) REFERENCES loads(id)
+);
+
+CREATE TABLE IF NOT EXISTS eld_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT,
+    payload TEXT,
+    logged_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -441,6 +534,14 @@ def generate_bol_number() -> str:
     return f"LP-{stamp}-{suffix}"
 
 
+_ALLOWED_TABLES = {
+    "loads", "leads", "fuel", "telematics", "geofence_events", "call_logs",
+    "maintenance", "sms_log", "compliance", "ai_suggestions", "app_settings",
+    "assets", "settlements", "routes", "customers", "purchase_orders", "po_loads",
+    "eld_events",
+}
+
+
 def _copy_simple_table(
     src: sqlite3.Connection,
     dst: sqlite3.Connection,
@@ -449,16 +550,18 @@ def _copy_simple_table(
     dedupe_sql: str | None = None,
     dedupe_args_fn: Any = None,
 ) -> int:
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"Table '{table}' is not in the allowlist.")
     if not _table_exists(src, table) or not _table_exists(dst, table):
         return 0
 
-    dst_cols = [row[1] for row in dst.execute(f"PRAGMA table_info({table})").fetchall()]
-    src_cols = [row[1] for row in src.execute(f"PRAGMA table_info({table})").fetchall()]
+    dst_cols = [row[1] for row in dst.execute(f'PRAGMA table_info("{table}")').fetchall()]
+    src_cols = [row[1] for row in src.execute(f'PRAGMA table_info("{table}")').fetchall()]
     common = [c for c in dst_cols if c in src_cols]
     if not common:
         return 0
 
-    rows = src.execute(f"SELECT {', '.join(common)} FROM {table}").fetchall()
+    rows = src.execute(f'SELECT {", ".join(common)} FROM "{table}"').fetchall()
     inserted = 0
     col_sql = ", ".join(common)
     placeholders = ", ".join("?" for _ in common)
@@ -470,7 +573,7 @@ def _copy_simple_table(
             if args and dst.execute(dedupe_sql, args).fetchone():
                 continue
         dst.execute(
-            f"INSERT INTO {table} ({col_sql}) VALUES ({placeholders})",
+            f'INSERT INTO "{table}" ({col_sql}) VALUES ({placeholders})',
             tuple(payload[c] for c in common),
         )
         inserted += 1
@@ -961,10 +1064,71 @@ def init_db() -> None:
                     ),
                 )
 
+        load_cols = {row[1] for row in conn.execute("PRAGMA table_info(loads)").fetchall()}
+        if "asset_id" not in load_cols:
+            conn.execute("ALTER TABLE loads ADD COLUMN asset_id INTEGER")
+        if "route_id" not in load_cols:
+            conn.execute("ALTER TABLE loads ADD COLUMN route_id INTEGER")
+
         conn.commit()
 
     migrate_legacy_databases()
+    _migrate_legacy_phase1_db()
     clear_cache()
+
+
+_ASSETS_SEED = [
+    ("Truck+Trailer", "Tractor + 39ft End-Dump", "Primary unit", 1.75, 0.85),
+    ("Truck+Trailer", "Backup Tractor + Trailer", "Secondary unit", 1.65, 0.80),
+    ("Trailer", "39ft End-Dump Only", "Trailer only", 1.50, 0.75),
+]
+
+_CUSTOMERS_SEED = [
+    ("Kohler Co.", "Dispatch", "706-555-0100", "dispatch@kohler.example", None, "Primary GA receiver"),
+    ("Sibelco Spruce Pine", "Sales", "828-555-0200", "sales@sibelco.example", None, "Primary NC shipper"),
+    ("Covia", "Logistics", "1-800-555-0300", "logistics@covia.example", None, "National miner"),
+]
+
+
+def seed_assets() -> None:
+    with closing(get_conn()) as conn:
+        if conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0] == 0:
+            for a in _ASSETS_SEED:
+                conn.execute(
+                    "INSERT INTO assets (asset_type, name, description, loaded_rate_per_mile, empty_rate_per_mile) VALUES (?,?,?,?,?)",
+                    a,
+                )
+            conn.commit()
+
+
+def seed_customers() -> None:
+    with closing(get_conn()) as conn:
+        if conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 0:
+            for c in _CUSTOMERS_SEED:
+                conn.execute(
+                    "INSERT INTO customers (name, contact_name, phone, email, api_key, notes) VALUES (?,?,?,?,?,?)",
+                    c,
+                )
+            conn.commit()
+
+
+def _migrate_legacy_phase1_db() -> None:
+    """One-time copy from l_and_p_freight.db into lp_dispatch.db if present."""
+    legacy = BASE_DIR / "l_and_p_freight.db"
+    if not legacy.exists():
+        return
+    try:
+        src = sqlite3.connect(legacy)
+        dst = get_conn()
+        for table in ("assets", "settlements", "routes", "customers", "purchase_orders", "po_loads", "eld_events"):
+            try:
+                _copy_simple_table(src, dst, table)
+            except Exception:
+                pass
+        dst.commit()
+        src.close()
+    except Exception:
+        pass
 
 
 @st.cache_data(show_spinner=False)
@@ -1104,7 +1268,8 @@ def seed_demo_data(force: bool = False) -> dict[str, Any]:
             }
 
         for table in ("loads", "fuel", "telematics", "geofence_events", "call_logs", "maintenance"):
-            conn.execute(f"DELETE FROM {table}")
+            if table in _ALLOWED_TABLES:
+                conn.execute(f'DELETE FROM "{table}"')
 
         origin = PRIMARY_LANE["origin"]
         destination = PRIMARY_LANE["destination"]

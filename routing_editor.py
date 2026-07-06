@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "l_and_p_freight.db"
+DB_PATH = BASE_DIR / "lp_dispatch.db"
 
 
 def get_conn() -> sqlite3.Connection:
