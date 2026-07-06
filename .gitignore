@@ -1,0 +1,74 @@
+# Virtualenv
+.venv/
+.venv-*/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Binaries
+deploy/cloudflared.exe
+
+# Databases — never commit local data
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+.env.*
+
+# Logs
+*.log
+*.pid
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Decompiled / generated code — do not track
+_decompiled/
+__decompiled__/
+_decompiled_app/
+
+# Terminal artifacts
+terminals/
+*.pid
+
+# Docker / deploy artifacts
+deploy/*.log
+deploy/tunnel.log
+deploy/tunnel.err.log
+
+# MCP protocol JSON — external vendor schemas, not source
+mcps/
+
+# Web deployment bundle — generated static assets
+web/static/
+web/manifest.json
+
+# Frontend caches
+site/
+_page_meta.txt
+_page_meta2.txt
+
+# Drafts
+*.db_dis
+app_v3_recovered.py*
+app.cpython-*.pyc
