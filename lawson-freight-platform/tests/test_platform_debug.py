@@ -158,6 +158,21 @@ def test_emergency_message_format():
     assert "MEDICAL" in msg
     assert "Phillip" in msg
     assert "35.90000" in msg
+    assert "911" in msg
+
+
+def test_emergency_sms_blocklist():
+    from lp_helpers.emergency_alerts import (
+        OFFICIAL_EMERGENCY_DIAL,
+        is_sms_blocked_number,
+    )
+
+    assert is_sms_blocked_number("911")
+    assert is_sms_blocked_number("+1911")
+    assert is_sms_blocked_number("988")
+    assert is_sms_blocked_number("511")
+    assert not is_sms_blocked_number("+18285551234")
+    assert any(d["id"] == "911" for d in OFFICIAL_EMERGENCY_DIAL)
 
 
 def test_bol_pdf_generation():

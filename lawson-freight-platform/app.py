@@ -438,14 +438,15 @@ def log_sms_event(
 
 
 def _emergency_contact_phones() -> list[str]:
+    from lp_helpers.emergency_alerts import is_sms_blocked_number
+
     numbers: list[str] = []
     for key in ("dispatch_phone", "phillip_phone", "lawson_phone"):
         raw = get_secret("emergency", key, "")
         if raw.strip():
-            numbers.append(normalize_phone(raw.strip()))
-    owner = get_active_owner()
-    if owner == "Phillip" and not get_secret("emergency", "phillip_phone"):
-        pass
+            normalized = normalize_phone(raw.strip())
+            if not is_sms_blocked_number(normalized):
+                numbers.append(normalized)
     seen: set[str] = set()
     unique: list[str] = []
     for n in numbers:
@@ -486,7 +487,10 @@ def dispatch_emergency(
     phones = _emergency_contact_phones()
     auto_send = get_secret("emergency", "auto_send", "1") == "1"
     if not phones:
-        return False, "Emergency logged — add [emergency] phone numbers in secrets.toml to auto-text dispatch."
+        return False, (
+            "Emergency logged — add Phillip/Lawson cell numbers in [emergency] secrets "
+            "(911 is voice-only; use the CALL 911 button above)."
+        )
     if not auto_send:
         return False, f"Emergency logged — auto-send off. Text manually: {', '.join(phones)}"
 
