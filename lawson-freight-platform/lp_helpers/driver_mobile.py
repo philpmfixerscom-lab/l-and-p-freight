@@ -81,6 +81,7 @@ def render_driver_app(
     get_traccar_fix: Callable[[], dict[str, Any] | None],
     format_sms: Callable[[str, dict[str, Any]], str],
     log_sms_event: Callable[..., None],
+    on_emergency: Callable[[str, str, dict[str, Any]], tuple[bool, str]] | None = None,
     on_exit: Callable[[], None] | None = None,
 ) -> None:
     st.markdown(CABIN_CSS, unsafe_allow_html=True)
@@ -115,6 +116,20 @@ def render_driver_app(
     c3.metric("Miles", f"{float(load.get('loaded_miles', 285)):.0f} ld")
 
     fix = get_traccar_fix()
+
+    if on_emergency:
+        from lp_helpers.emergency_alerts import render_emergency_panel
+
+        render_emergency_panel(
+            driver=owner,
+            truck_label=truck_label,
+            load=load,
+            gps_fix=fix,
+            on_dispatch=on_emergency,
+            compact=True,
+            key_prefix="driver_em",
+        )
+
     st.markdown("#### 📍 GPS")
     if fix:
         g1, g2, g3 = st.columns(3)

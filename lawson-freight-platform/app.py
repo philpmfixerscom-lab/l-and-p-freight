@@ -437,6 +437,106 @@ def log_sms_event(
         conn.commit()
 
 
+def _emergency_contact_phones() -> list[str]:
+    numbers: list[str] = []
+    for key in ("dispatch_phone", "phillip_phone", "lawson_phone"):
+        raw = get_secret("emergency", key, "")
+        if raw.strip():
+            numbers.append(normalize_phone(raw.strip()))
+    owner = get_active_owner()
+    if owner == "Phillip" and not get_secret("emergency", "phillip_phone"):
+        pass
+    seen: set[str] = set()
+    unique: list[str] = []
+    for n in numbers:
+        if n and n not in seen:
+            seen.add(n)
+            unique.append(n)
+    return unique
+
+
+def dispatch_emergency(
+    emergency_key: str,
+    message: str,
+    context: dict[str, Any],
+) -> tuple[bool, str]:
+    """Log emergency, annotate active load, optionally SMS dispatch contacts."""
+    log_sms_event(None, f"emergency_{emergency_key}", message, "emergency")
+
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM loads
+                WHERE status IN ('Dispatched', 'In Transit', 'Booked')
+                ORDER BY pickup_date DESC LIMIT 1
+                """
+            ).fetchone()
+            if row:
+                stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                note = f"\n[{stamp}] EMERGENCY {emergency_key}: {context.get('detail', '')}"
+                conn.execute(
+                    "UPDATE loads SET notes = COALESCE(notes, '') || ? WHERE id = ?",
+                    (note, row["id"]),
+                )
+                conn.commit()
+    except Exception as exc:
+        log.warning("Emergency load note failed: %s", exc)
+
+    phones = _emergency_contact_phones()
+    auto_send = get_secret("emergency", "auto_send", "1") == "1"
+    if not phones:
+        return False, "Emergency logged — add [emergency] phone numbers in secrets.toml to auto-text dispatch."
+    if not auto_send:
+        return False, f"Emergency logged — auto-send off. Text manually: {', '.join(phones)}"
+
+    sent = 0
+    errors: list[str] = []
+    for phone in phones:
+        try:
+            tw_sid = send_twilio_notification(phone, message)
+            log_sms_event(None, f"emergency_{emergency_key}", message, "twilio", tw_sid)
+            sent += 1
+        except Exception as exc:
+            errors.append(str(exc))
+    if sent:
+        msg = f"Emergency SMS sent to {sent} contact(s)."
+        if errors:
+            msg += f" ({len(errors)} failed)"
+        return True, msg
+    return False, f"Emergency logged but SMS failed: {errors[0] if errors else 'unknown'}"
+
+
+def _render_emergency_controls(
+    *,
+    load: dict[str, Any] | None = None,
+    gps_fix: dict[str, Any] | None = None,
+    key_prefix: str = "dispatch_em",
+    compact: bool = False,
+) -> None:
+    from lp_helpers.emergency_alerts import render_emergency_panel
+
+    if load is None:
+        loads_df = fetch_loads()
+        if not loads_df.empty:
+            active = loads_df[
+                loads_df["status"].astype(str).isin(["Dispatched", "In Transit", "Booked"])
+            ]
+            load = active.iloc[0].to_dict() if not active.empty else loads_df.iloc[0].to_dict()
+        else:
+            load = {}
+
+    render_emergency_panel(
+        driver=get_active_owner(),
+        truck_label=TRUCK_LABEL,
+        load=load,
+        gps_fix=gps_fix,
+        on_dispatch=lambda k, m, c: dispatch_emergency(k, m, c),
+        compact=compact,
+        key_prefix=key_prefix,
+    )
+
+
 def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> None:
     if get_secret("twilio", "auto_send", "0") != "1" and st.session_state.get("sms_auto_send") != "1":
         return
@@ -1178,6 +1278,9 @@ def render_dashboard_tab() -> None:
     kpi6.metric("Loads Logged", metrics["loads_logged"])
     kpi7.metric("In Transit / Dispatched", metrics["in_transit"])
     kpi8.metric("Primary Receiver", PRIMARY_RECEIVER[:16])
+
+    with st.expander("🚨 Emergency Dispatch", expanded=False):
+        _render_emergency_controls(key_prefix="dash_em", compact=True)
 
     st.markdown("#### Quick Actions")
     action1, action2, action3, action4 = st.columns(4)
@@ -2165,6 +2268,14 @@ def render_gps_tracking_tab() -> None:
         ]
         st.dataframe(pd.DataFrame(fleet_rows), use_container_width=True, hide_index=True)
 
+    st.divider()
+    st.markdown("#### 🚨 Emergency")
+    primary_fix = map_fleet[0] if map_fleet else None
+    _render_emergency_controls(
+        gps_fix=primary_fix if primary_fix and not using_sim else None,
+        key_prefix="gps_em",
+    )
+
     st.info(
         "Setup Traccar self-hosted or cloud for real device tracking. "
         "Add server URL + API token above, or configure `[traccar]` in `.streamlit/secrets.toml`."
@@ -2182,7 +2293,11 @@ def render_gps_tracking_tab() -> None:
 
 def render_alerts_tab() -> None:
     st.subheader("Alerts")
-    st.caption("Twilio SMS · SMTP email · auto-send on dispatch · secure secrets.toml")
+    st.caption("Twilio SMS · SMTP email · emergency dispatch · secure secrets.toml")
+
+    _render_emergency_controls(key_prefix="alert_em")
+
+    st.divider()
 
     tw_ok = all([
         get_secret("twilio", "account_sid"),
@@ -2483,6 +2598,7 @@ def main() -> None:
             get_traccar_fix=_traccar_fix_for_driver,
             format_sms=format_sms,
             log_sms_event=log_sms_event,
+            on_emergency=dispatch_emergency,
             on_exit=_exit_driver_view,
         )
         return

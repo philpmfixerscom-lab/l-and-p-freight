@@ -144,6 +144,22 @@ def test_bulkloads_upsert_no_duplicates(tmp_path, monkeypatch):
     assert n == 1
 
 
+def test_emergency_message_format():
+    from lp_helpers.emergency_alerts import build_emergency_context, format_emergency_message
+
+    ctx = build_emergency_context(
+        "medical",
+        driver="Phillip",
+        truck_label="L&P Lawson End-Dump",
+        load={"bol_number": "LP-1", "commodity": "Feldspar", "weight_tons": 24},
+        gps_fix={"latitude": 35.9, "longitude": -82.1, "speed_mph": 0},
+    )
+    msg = format_emergency_message(ctx)
+    assert "MEDICAL" in msg
+    assert "Phillip" in msg
+    assert "35.90000" in msg
+
+
 def test_bol_pdf_generation():
     from lp_helpers.bol_export import generate_branded_bol_pdf
 
