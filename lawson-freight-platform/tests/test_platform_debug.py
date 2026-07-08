@@ -81,13 +81,39 @@ def test_app_helper_functions():
     assert metrics["loaded_share"] == 1.0
 
 
+def test_traccar_fetch_fleet_structure():
+    from lp_helpers.traccar_live import TraccarLive
+
+    client = TraccarLive(get_secret=lambda _s, _k, d="": d, url="http://localhost:8082")
+    client._device_names = {1: "Lawson Truck 1"}
+    client.fetch_devices = lambda: [{"id": 1, "name": "Lawson Truck 1", "status": "online"}]  # type: ignore[method-assign]
+    client.fetch_positions = lambda device_id=None: [  # type: ignore[method-assign]
+        {
+            "deviceId": 1,
+            "latitude": 35.9,
+            "longitude": -82.1,
+            "speed": 50.0,
+            "fixTime": "2026-07-08T12:00:00Z",
+        }
+    ]
+    fleet = client.fetch_fleet()
+    assert len(fleet) == 1
+    assert fleet[0]["device_name"] == "Lawson Truck 1"
+    assert fleet[0]["latitude"] == 35.9
+
+
 def test_traccar_live_offline_graceful():
     from lp_helpers.traccar_live import TraccarLive
 
-    client = TraccarLive(get_secret=lambda s, k, d="": d)
+    client = TraccarLive(
+        get_secret=lambda s, k, d="": d,
+        url="http://127.0.0.1:1",
+        api_token="",
+    )
     status = client.connection_status()
     assert "ok" in status
-    assert client.get_live_fix() is None or isinstance(client.get_live_fix(), dict)
+    assert status["ok"] is False
+    assert client.fetch_fleet() == []
 
 
 def test_bulkloads_upsert_no_duplicates(tmp_path, monkeypatch):

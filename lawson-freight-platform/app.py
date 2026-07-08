@@ -453,25 +453,54 @@ def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> None
         log.warning("Auto SMS skipped: %s", exc)
 
 
+def _traccar_connection_params() -> tuple[str, str, str, str]:
+    url = st.session_state.get(
+        "traccar_url_input",
+        get_secret("traccar", "url", "http://localhost:8082"),
+    )
+    token = st.session_state.get(
+        "traccar_api_key_input",
+        get_secret("traccar", "api_token", ""),
+    )
+    email = get_secret("traccar", "email", "admin")
+    password = get_secret("traccar", "password", "admin")
+    return url.strip(), token.strip(), email, password
+
+
 def get_traccar_live() -> Any:
     from lp_helpers.traccar_live import TraccarLive
 
-    return TraccarLive(get_secret=get_secret)
+    url, token, email, password = _traccar_connection_params()
+    return TraccarLive(
+        get_secret=get_secret,
+        url=url,
+        api_token=token,
+        email=email,
+        password=password,
+    )
 
 
 @st.cache_data(ttl=20, show_spinner=False)
-def _cached_traccar_fix(device_id: int | None) -> dict[str, Any] | None:
-    return get_traccar_live().get_live_fix(device_id)
+def _cached_traccar_fleet(
+    url: str, token: str, email: str, password: str
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    from lp_helpers.traccar_live import TraccarLive
 
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _cached_traccar_devices() -> list[dict[str, Any]]:
-    return get_traccar_live().fetch_devices()
+    client = TraccarLive(
+        get_secret=get_secret,
+        url=url,
+        api_token=token,
+        email=email,
+        password=password,
+    )
+    status = client.connection_status()
+    if not status.get("ok"):
+        return status, [], []
+    return status, client.fetch_fleet(), client.fetch_devices()
 
 
 def clear_traccar_cache() -> None:
-    _cached_traccar_fix.clear()
-    _cached_traccar_devices.clear()
+    _cached_traccar_fleet.clear()
 
 
 def interpolate_route(progress: float) -> tuple[float, float, str]:
@@ -1962,153 +1991,193 @@ def render_load_board_tab() -> None:
 
 
 def render_gps_tracking_tab() -> None:
-    st.subheader("GPS")
-    st.caption("Live Traccar hookup · geofence alerts · Spruce Pine → Central GA simulation fallback")
+    st.header("Traccar GPS Fleet Tracking")
+    st.subheader("Live Truck Locations")
+    st.caption(f"{TRUCK_LABEL} · Spruce Pine → Central GA · geofence alerts · sim fallback")
 
-    traccar = get_traccar_live()
-    conn_status = traccar.connection_status()
-    status_col1, status_col2 = st.columns([2, 1])
-    if conn_status["ok"]:
-        status_col1.success(f"Traccar LIVE — {conn_status.get('message', 'connected')}")
-    else:
-        status_col1.warning(f"Traccar: {conn_status.get('message', 'offline')} — simulation available")
+    default_url = get_secret("traccar", "url", "http://localhost:8082")
+    default_token = get_secret("traccar", "api_token", "")
 
-    devices = _cached_traccar_devices() if conn_status["ok"] else []
-    device_options: dict[str, int | None] = {"Auto (online device)": None}
-    for d in devices:
-        label = f"{d.get('name', 'Device')} ({d.get('status', '?')})"
-        device_options[label] = int(d["id"])
-
-    selected_device_label = status_col2.selectbox(
-        "Traccar device",
-        list(device_options.keys()),
-        key="traccar_device_pick",
+    cfg1, cfg2 = st.columns(2)
+    traccar_url = cfg1.text_input(
+        "Traccar Server URL",
+        value=st.session_state.get("traccar_url_input", default_url),
+        placeholder="http://your-traccar-server:8082",
+        key="traccar_url_input",
     )
-    device_id = device_options[selected_device_label]
+    traccar_key = cfg2.text_input(
+        "API Token / Key",
+        value=st.session_state.get("traccar_api_key_input", default_token),
+        type="password",
+        placeholder="Bearer token or email:password",
+        key="traccar_api_key_input",
+    )
 
-    live_poll = st.toggle("Live Traccar poll (20s cache)", value=True, key="gps_live_poll")
-    live_sim = st.toggle(
-        "Route simulation fallback",
+    opt1, opt2, opt3 = st.columns(3)
+    live_sim = opt1.toggle(
+        "Simulation fallback",
         value=st.session_state.get("gps_live_sim", "1") == "1",
         key="gps_sim_toggle",
     )
     save_filter("gps_live_sim", "1" if live_sim else "0")
+    opt2.caption("Leave token blank to use email/password from secrets.toml")
+    refresh_clicked = opt3.button("Refresh GPS", type="primary", use_container_width=True)
+
+    if refresh_clicked:
+        clear_traccar_cache()
+        persist_setting("traccar_url", traccar_url.strip())
+        if traccar_key.strip():
+            persist_setting("traccar_api_token", traccar_key.strip())
+
+    url, token, email, password = _traccar_connection_params()
+    traccar = get_traccar_live()
+
+    if refresh_clicked or st.session_state.get("gps_auto_fetch", True):
+        conn_status, fleet, devices = _cached_traccar_fleet(url, token, email, password)
+    else:
+        conn_status, fleet, devices = traccar.connection_status(), [], []
 
     if "gps_sim_progress" not in st.session_state:
         st.session_state.gps_sim_progress = 0.0
     if live_sim:
         st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.03) % 1.0
 
-    fix = None
-    if conn_status["ok"]:
-        if live_poll:
-            fix = _cached_traccar_fix(device_id)
-        elif st.session_state.get("gps_force_poll"):
-            clear_traccar_cache()
-            fix = _cached_traccar_fix(device_id)
-            st.session_state.gps_force_poll = False
+    live_units = [f for f in fleet if f.get("latitude") is not None]
+    using_sim = not conn_status.get("ok") or not live_units
 
-    using_sim = fix is None
-    if conn_status["ok"] and using_sim and not live_sim:
-        st.warning("Traccar connected but no position fix — enable poll or check device online.")
+    if conn_status.get("ok"):
+        st.success(
+            f"Connected to Traccar — {len(devices)} device(s), "
+            f"{len(live_units)} with live position"
+        )
+    elif refresh_clicked:
+        st.error(f"Connection failed — {conn_status.get('message', 'check Traccar server')}")
+    else:
+        st.warning(f"Traccar offline — {conn_status.get('message', 'not connected')}")
 
-    if using_sim:
-        lat, lon, location_label = interpolate_route(st.session_state.gps_sim_progress)
-        speed = 58.0
-        device_name = f"{TRUCK_LABEL} (Sim)"
+    if using_sim and live_sim:
+        sim_lat, sim_lon, sim_label = interpolate_route(st.session_state.gps_sim_progress)
+        primary = {
+            "device_name": f"{TRUCK_LABEL} (Sim)",
+            "latitude": sim_lat,
+            "longitude": sim_lon,
+            "speed_mph": 58.0,
+            "status": "simulation",
+        }
+        map_fleet = [primary]
         st.markdown(
             '<span class="lf-gps-badge sim">● SIMULATION</span>',
             unsafe_allow_html=True,
         )
-    else:
-        lat = fix["latitude"]
-        lon = fix["longitude"]
-        speed = fix["speed_mph"]
-        device_name = fix["device_name"]
-        location_label = device_name
+    elif live_units:
+        map_fleet = live_units
         st.markdown(
-            '<span class="lf-gps-badge live">● LIVE TRACCAR</span>',
+            '<span class="lf-gps-badge live">● LIVE TRACCAR FLEET</span>',
             unsafe_allow_html=True,
         )
-        if st.button("Save fix to telematics", use_container_width=True):
+    else:
+        map_fleet = []
+        st.error("No GPS data — check Traccar server or enable simulation fallback.")
+
+    if map_fleet:
+        primary = map_fleet[0]
+        lat = primary["latitude"]
+        lon = primary["longitude"]
+        speed = primary.get("speed_mph", 0)
+        device_name = primary.get("device_name", TRUCK_LABEL)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Latitude", f"{lat:.5f}")
+        m2.metric("Longitude", f"{lon:.5f}")
+        m3.metric("Speed", f"{speed:.0f} mph")
+        m4.metric("Primary unit", str(device_name)[:22])
+
+        if not using_sim and st.button("Save primary fix to telematics", use_container_width=True):
             try:
                 with closing(get_connection()) as conn:
-                    traccar.persist_telematics(conn, fix)
+                    traccar.persist_telematics(conn, primary)
                 st.success("Position logged to telematics table.")
             except Exception as exc:
                 st.error(str(exc))
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Latitude", f"{lat:.5f}")
-    m2.metric("Longitude", f"{lon:.5f}")
-    m3.metric("Speed", f"{speed:.0f} mph")
-    m4.metric("Location", location_label[:28])
+        geofences = LAWSON_GEOFENCES
 
-    geofences = LAWSON_GEOFENCES
+        def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            from math import asin, cos, radians, sin, sqrt
 
-    def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        from math import asin, cos, radians, sin, sqrt
+            r = 3958.8
+            dlat = radians(lat2 - lat1)
+            dlon = radians(lon2 - lon1)
+            a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+            return 2 * r * asin(sqrt(a))
 
-        r = 3958.8
-        dlat = radians(lat2 - lat1)
-        dlon = radians(lon2 - lon1)
-        a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
-        return 2 * r * asin(sqrt(a))
-
-    for gf_name, gf_lat, gf_lon, gf_radius_mi in geofences:
-        dist = _haversine_mi(lat, lon, gf_lat, gf_lon)
-        if dist <= gf_radius_mi:
-            st.success(f"Geofence alert: inside **{gf_name}** ({dist:.1f} mi from center)")
-            if st.button(f"Log arrival SMS for {gf_name}", key=f"gps_arrival_{gf_name}"):
-                body = format_sms("arrival", {"location": gf_name, "company": "Dispatch"})
-                log_sms_event(None, "geofence_arrival", body, "gps_geofence")
-                st.info("Arrival alert logged — send from **Alerts** tab.")
-
-    if HAS_FOLIUM:
-        center_lat = (SIM_ROUTE[0][0] + SIM_ROUTE[-1][0]) / 2
-        center_lon = (SIM_ROUTE[0][1] + SIM_ROUTE[-1][1]) / 2
-        fmap = folium.Map(location=[center_lat, center_lon], zoom_start=7, tiles="CartoDB dark_matter")
-        route_coords = [(p[0], p[1]) for p in SIM_ROUTE]
-        folium.PolyLine(route_coords, color="#ff8c42", weight=4, opacity=0.85).add_to(fmap)
-        for p_lat, p_lon, p_label in SIM_ROUTE:
-            folium.CircleMarker(
-                [p_lat, p_lon], radius=5, color="#7dd3fc", fill=True, popup=p_label
-            ).add_to(fmap)
         for gf_name, gf_lat, gf_lon, gf_radius_mi in geofences:
-            folium.Circle(
-                [gf_lat, gf_lon],
-                radius=int(gf_radius_mi * 1609),
-                color="#5eead4",
-                fill=True,
-                fill_opacity=0.12,
-                popup=gf_name,
-            ).add_to(fmap)
-        folium.Marker(
-            [lat, lon],
-            popup=f"{device_name} @ {speed:.0f} mph",
-            icon=folium.Icon(color="orange", icon="truck", prefix="fa"),
-        ).add_to(fmap)
-        st_folium(fmap, width=None, height=420, returned_objects=[])
-    else:
-        st.warning("Install folium + streamlit-folium for interactive map: pip install folium streamlit-folium")
-        render_target_lane_banner()
+            dist = _haversine_mi(lat, lon, gf_lat, gf_lon)
+            if dist <= gf_radius_mi:
+                st.success(f"Geofence alert: inside **{gf_name}** ({dist:.1f} mi from center)")
+                if st.button(f"Log arrival SMS for {gf_name}", key=f"gps_arrival_{gf_name}"):
+                    body = format_sms("arrival", {"location": gf_name, "company": "Dispatch"})
+                    log_sms_event(None, "geofence_arrival", body, "gps_geofence")
+                    st.info("Arrival alert logged — send from **Alerts** tab.")
 
-    with st.expander("Traccar connection & setup"):
+        if HAS_FOLIUM:
+            center_lat = lat
+            center_lon = lon
+            fmap = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB dark_matter")
+            route_coords = [(p[0], p[1]) for p in SIM_ROUTE]
+            folium.PolyLine(route_coords, color="#ff8c42", weight=4, opacity=0.85).add_to(fmap)
+            for gf_name, gf_lat, gf_lon, gf_radius_mi in geofences:
+                folium.Circle(
+                    [gf_lat, gf_lon],
+                    radius=int(gf_radius_mi * 1609),
+                    color="#5eead4",
+                    fill=True,
+                    fill_opacity=0.12,
+                    popup=gf_name,
+                ).add_to(fmap)
+            for unit in map_fleet:
+                if unit.get("latitude") is None:
+                    continue
+                icon_color = "green" if unit.get("status") == "online" else "orange"
+                folium.Marker(
+                    [unit["latitude"], unit["longitude"]],
+                    popup=(
+                        f"{unit.get('device_name', 'Truck')} · "
+                        f"{unit.get('speed_mph', 0):.0f} mph · {unit.get('status', '?')}"
+                    ),
+                    icon=folium.Icon(color=icon_color, icon="truck", prefix="fa"),
+                ).add_to(fmap)
+            st_folium(fmap, width=700, height=500, returned_objects=[])
+        else:
+            st.warning("Install folium + streamlit-folium for map: pip install folium streamlit-folium")
+
+    if fleet:
+        st.markdown("#### Fleet devices")
+        fleet_rows = [
+            {
+                "Name": f.get("device_name"),
+                "Status": f.get("status"),
+                "Lat": f.get("latitude"),
+                "Lon": f.get("longitude"),
+                "Speed mph": round(float(f.get("speed_mph") or 0), 1),
+            }
+            for f in fleet
+        ]
+        st.dataframe(pd.DataFrame(fleet_rows), use_container_width=True, hide_index=True)
+
+    st.info(
+        "Setup Traccar self-hosted or cloud for real device tracking. "
+        "Add server URL + API token above, or configure `[traccar]` in `.streamlit/secrets.toml`."
+    )
+
+    with st.expander("Traccar connection details"):
         st.code(
-            f"URL: {traccar.base_url}\nEmail: {traccar.email}\n"
-            f"Device ID (secrets): {traccar.preferred_device_id or 'auto'}\n"
-            f"Devices online: {sum(1 for d in devices if d.get('status') == 'online')}/{len(devices)}\n"
-            f"Mode: {conn_status.get('mode', '?')}",
+            f"URL: {url}\n"
+            f"Auth: {'API token' if token else f'email {email}'}\n"
+            f"Devices: {len(devices)} · Live fixes: {len(live_units)}\n"
+            f"Version: {conn_status.get('version', '—')}",
             language="text",
         )
-        st.caption(
-            "Configure [traccar] in `.streamlit/secrets.toml` — set `device_id` to your end-dump tracker ID."
-        )
-        if st.button("Refresh GPS / clear cache", use_container_width=True):
-            clear_traccar_cache()
-            st.session_state.gps_force_poll = True
-            st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.1) % 1.0
-            st.rerun()
 
 
 def render_alerts_tab() -> None:
@@ -2401,8 +2470,10 @@ def main() -> None:
         from lp_helpers.driver_mobile import render_driver_app
 
         def _traccar_fix_for_driver() -> dict[str, Any] | None:
-            if get_traccar_live().connection_status().get("ok"):
-                return _cached_traccar_fix(None)
+            url, token, email, password = _traccar_connection_params()
+            status, fleet, _devices = _cached_traccar_fleet(url, token, email, password)
+            if status.get("ok"):
+                return get_traccar_live().get_live_fix(None)
             return None
 
         render_driver_app(
