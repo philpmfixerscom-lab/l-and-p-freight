@@ -1,6 +1,6 @@
 """
-Lawson Freight Platform — BIG E Elite Refresh.
-Traccar GPS · Twilio SMS · SMTP email · Plotly analytics · ReportLab BOL · lp_dispatch.db.
+L & P Dispatch — Lawson Freight Platform.
+Optimized for Phillip & Lawson: Spruce Pine NC → Kohler GA · 39ft end-dump · mineral lane.
 """
 
 from __future__ import annotations
@@ -50,7 +50,54 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "lp_dispatch.db"
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
-APP_VERSION = "4.1 BIG E"
+APP_VERSION = "4.2 Lawson"
+
+try:
+    from lp_helpers.lawson_profile import (
+        CARRIER_NAME,
+        DEFAULT_OWNER,
+        DRIVERS,
+        HIGHWAY_CORRIDORS,
+        LAWSON_GEOFENCES,
+        LAWSON_SEED_LEADS,
+        LAWSON_SIM_ROUTE,
+        LOADED_MILE_TARGET,
+        MISSION_BLURB,
+        PAGE_TITLE,
+        PLATFORM_TITLE,
+        PRIMARY_RECEIVER,
+        TAGLINE,
+        TRAILER_DESC,
+        TRUCK_LABEL,
+    )
+except ImportError:
+    CARRIER_NAME = "L & P Dispatch"
+    PLATFORM_TITLE = "L & P Dispatch — Lawson Freight"
+    PAGE_TITLE = "L & P Dispatch | Lawson Freight"
+    TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
+    MISSION_BLURB = (
+        "Build loaded miles Spruce Pine NC → Central Georgia (Kohler area). "
+        "Minimize deadhead on Hwy 19E & 226."
+    )
+    DEFAULT_OWNER = "Phillip"
+    DRIVERS = ("Phillip", "Lawson")
+    TRUCK_LABEL = "L&P Lawson End-Dump"
+    TRAILER_DESC = "39ft Frameless End-Dump"
+    HIGHWAY_CORRIDORS = "Hwy 19E & 226"
+    LOADED_MILE_TARGET = 0.80
+    PRIMARY_RECEIVER = "Kohler Co."
+    LAWSON_SIM_ROUTE = [
+        (35.912, -82.064, "Spruce Pine, NC"),
+        (35.650, -82.450, "Asheville corridor"),
+        (35.200, -82.800, "I-26 southbound"),
+        (34.500, -83.200, "Atlanta outskirts"),
+        (33.447, -83.809, "Central Georgia (Kohler area)"),
+    ]
+    LAWSON_GEOFENCES = [
+        ("Spruce Pine Yard", 35.912, -82.064, 0.8),
+        ("Kohler Central GA", 32.98, -82.72, 5.0),
+    ]
+    LAWSON_SEED_LEADS = []
 
 TAB_OPTIONS = [
     "Dashboard",
@@ -71,20 +118,14 @@ FILTER_DEFAULTS: dict[str, str] = {
     "sms_auto_send": "0",
 }
 
-SIM_ROUTE: list[tuple[float, float, str]] = [
-    (35.912, -82.064, "Spruce Pine, NC"),
-    (35.650, -82.450, "Asheville corridor"),
-    (35.200, -82.800, "I-26 southbound"),
-    (34.500, -83.200, "Atlanta outskirts"),
-    (33.447, -83.809, "Central Georgia (Kohler area)"),
-]
+SIM_ROUTE: list[tuple[float, float, str]] = LAWSON_SIM_ROUTE
 
 SMS_TEMPLATES: dict[str, str] = {
     "arrival": (
         "L & P FREIGHT | ARRIVAL\n"
         "{company}\n"
         "On site: {location}\n"
-        "Driver: Phillip · 39ft end-dump\n"
+        "Driver: {driver} · 39ft end-dump\n"
         "Reply STOP to opt out."
     ),
     "load update": (
@@ -98,7 +139,7 @@ SMS_TEMPLATES: dict[str, str] = {
         "L & P FREIGHT | DEPARTURE\n"
         "{company}\n"
         "Departing: {location}\n"
-        "ETA per BOL · Phillip / Lawson\n"
+        "ETA per BOL · {driver}\n"
         "Reply STOP to opt out."
     ),
     "rate_confirmation": (
@@ -114,7 +155,7 @@ SMS_TEMPLATES: dict[str, str] = {
         "L & P FREIGHT | DISPATCHED\n"
         "BOL {bol_number}\n"
         "{commodity} · {weight_tons:.1f}t to {destination}\n"
-        "GPS tracking active. — Phillip"
+        "GPS tracking active. — {driver}"
     ),
     "bol_ready": (
         "L & P FREIGHT | BOL READY\n"
@@ -199,6 +240,23 @@ def persist_setting(key: str, value: str) -> None:
         _local_set_setting(key, value)
 
 
+def get_active_owner() -> str:
+    """Current operator — Phillip or Lawson (persisted in app_settings)."""
+    try:
+        from lp_helpers.ui_components import get_owner_role
+
+        role = get_owner_role()
+        return role if role in DRIVERS else DEFAULT_OWNER
+    except ImportError:
+        return _local_get_setting("owner_role", DEFAULT_OWNER) or DEFAULT_OWNER
+
+
+def set_active_owner(role: str) -> None:
+    if role not in DRIVERS:
+        return
+    persist_setting("owner_role", role)
+
+
 def load_persistent_filters() -> None:
     for key, default in FILTER_DEFAULTS.items():
         if key not in st.session_state:
@@ -241,13 +299,16 @@ def format_sms(template_key: str, context: dict[str, Any]) -> str:
         "bol_number": "DRAFT",
         "shipper": "Shipper",
         "pickup_date": str(date.today()),
+        "driver": get_active_owner(),
     }
     defaults.update(context)
+    if "driver" not in context:
+        defaults["driver"] = get_active_owner()
     try:
         return template.format(**defaults)
     except (KeyError, ValueError) as exc:
         log.warning("SMS template format error: %s", exc)
-        return f"L & P FREIGHT: {defaults.get('detail', 'Update')} — Phillip / Lawson"
+        return f"L & P FREIGHT: {defaults.get('detail', 'Update')} — {get_active_owner()}"
 
 
 EMAIL_TEMPLATES: dict[str, str] = {
@@ -436,6 +497,11 @@ class TraccarClient:
             return []
 
 
+@st.cache_resource(show_spinner=False)
+def get_traccar_client() -> TraccarClient:
+    return TraccarClient()
+
+
 def interpolate_route(progress: float) -> tuple[float, float, str]:
     """Return lat, lon, label along SIM_ROUTE for progress 0..1."""
     progress = max(0.0, min(1.0, progress))
@@ -502,7 +568,7 @@ PRIMARY_LANE = {
 }
 
 TRAILER_MAX_TONS = 24
-DEFAULT_LANE_MILES = 280
+DEFAULT_LANE_MILES = 285
 FUEL_COST_PER_MILE = 0.72
 OPS_COST_PER_MILE = 0.18
 DEFAULT_DEADHEAD_MILES = 285
@@ -565,40 +631,7 @@ CALL_OUTCOMES = [
     "Callback scheduled",
 ]
 
-SEED_LEADS = [
-    {
-        "company": "Sibelco Spruce Pine",
-        "phone": "Main: 828-592-2780 | Quartz site: 828-592-2820",
-        "lane_notes": "Highway 19E, Spruce Pine, NC 28777 — High-purity quartz + feldspar/mica byproducts",
-        "commodity_focus": "Quartz, Feldspar, Mica",
-        "status": "New",
-        "priority": 1,
-    },
-    {
-        "company": "Covia",
-        "phone": "Industrial sales: 1-800-243-9004",
-        "lane_notes": "7638 S Hwy 226, Spruce Pine, NC — Feldspar & minerals producer",
-        "commodity_focus": "Feldspar, Minerals",
-        "status": "New",
-        "priority": 2,
-    },
-    {
-        "company": "K-T Feldspar (The Quartz Corp)",
-        "phone": "828-765-9621",
-        "lane_notes": "8342 Hwy 226 N, Spruce Pine, NC 28777 — Key feldspar shipper",
-        "commodity_focus": "Feldspar",
-        "status": "New",
-        "priority": 3,
-    },
-    {
-        "company": "Feldspar Trucking (Trimac)",
-        "phone": "828-765-7491",
-        "lane_notes": "Local hauler — good intel source for backhauls",
-        "commodity_focus": "Bulk / brokered",
-        "status": "New",
-        "priority": 4,
-    },
-]
+SEED_LEADS = LAWSON_SEED_LEADS or []
 
 
 def get_connection() -> sqlite3.Connection:
@@ -635,13 +668,15 @@ def init_database() -> None:
             cursor.execute(
                 """
                 INSERT INTO leads
-                    (company, contact_name, phone, commodity_focus, lane_notes,
+                    (company, contact_name, phone, email, commodity_focus, lane_notes,
                      status, priority, created_at)
-                VALUES (?, 'Dispatch', ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """,
                 (
                     lead["company"],
-                    lead["phone"],
+                    lead.get("contact_name", "Dispatch"),
+                    lead.get("phone", ""),
+                    lead.get("email", ""),
                     lead["commodity_focus"],
                     lead["lane_notes"],
                     lead["status"],
@@ -720,16 +755,19 @@ def fetch_call_logs() -> pd.DataFrame:
 def compute_dashboard_metrics(
     leads_df: pd.DataFrame, loads_df: pd.DataFrame
 ) -> dict[str, float | int]:
-    hot_leads_contacted = 0
+    hot_leads = 0
     if not leads_df.empty:
-        hot_leads_contacted = int((leads_df["status"] != "New").sum())
+        hot_leads = int(leads_df["status"].astype(str).isin(["Hot", "Active", "Negotiating"]).sum())
 
     if loads_df.empty:
         return {
-            "hot_leads_contacted": hot_leads_contacted,
+            "hot_leads": hot_leads,
             "loads_logged": 0,
             "pipeline_revenue": 0.0,
             "avg_rate_per_ton": 0.0,
+            "loaded_share": 0.0,
+            "deadhead_miles": 0.0,
+            "in_transit": 0,
         }
 
     pipeline_revenue = float(loads_df["total_revenue"].fillna(0).sum())
@@ -740,11 +778,25 @@ def compute_dashboard_metrics(
         rates = loads_df["rate_per_ton"].dropna()
         avg_rate_per_ton = float(rates.mean()) if not rates.empty else 0.0
 
+    miles_col = loads_df["miles"] if "miles" in loads_df.columns else pd.Series(0, index=loads_df.index)
+    loaded = float(loads_df["loaded_miles"].fillna(miles_col).fillna(0).sum())
+    total_miles = float(loads_df["miles"].fillna(0).sum())
+    deadhead = float(loads_df["deadhead_miles"].fillna(0).sum())
+    if deadhead <= 0 and total_miles > 0:
+        deadhead = max(0.0, total_miles - loaded)
+    loaded_share = (loaded / total_miles) if total_miles > 0 else 0.0
+    in_transit = int(
+        loads_df["status"].astype(str).isin(["Dispatched", "In Transit"]).sum()
+    )
+
     return {
-        "hot_leads_contacted": hot_leads_contacted,
+        "hot_leads": hot_leads,
         "loads_logged": len(loads_df),
         "pipeline_revenue": pipeline_revenue,
         "avg_rate_per_ton": avg_rate_per_ton,
+        "loaded_share": loaded_share,
+        "deadhead_miles": deadhead,
+        "in_transit": in_transit,
     }
 
 
@@ -1004,16 +1056,31 @@ def navigate_to_tab(tab_name: str) -> None:
     st.rerun()
 
 
+def render_lawson_sidebar_extras() -> None:
+    """Owner role + Lawson lane context in sidebar."""
+    owner = st.selectbox(
+        "Operating as",
+        list(DRIVERS),
+        index=list(DRIVERS).index(get_active_owner())
+        if get_active_owner() in DRIVERS
+        else 0,
+        key="lawson_owner_role",
+    )
+    if owner != get_active_owner():
+        set_active_owner(owner)
+        st.rerun()
+
+
 def render_sidebar() -> None:
     with st.sidebar:
         st.header("Mission Control")
+        st.markdown(f"**{CARRIER_NAME}**")
         st.write("**Spruce Pine NC → Central GA**")
-        st.write("**39ft Frameless End-Dump**")
+        st.write(f"**{TRAILER_DESC}**")
+        render_lawson_sidebar_extras()
         st.divider()
-        st.markdown(
-            "**Mission:** Build loaded miles to Kohler area. "
-            "Minimize deadhead on Hwy 19E & 226."
-        )
+        st.markdown(f"**Corridor:** {HIGHWAY_CORRIDORS}")
+        st.markdown(f"**Receiver:** {PRIMARY_RECEIVER}")
         st.divider()
         st.subheader("Trailer Specs")
         st.markdown("- **Type:** 39 ft frameless end-dump")
@@ -1024,7 +1091,7 @@ def render_sidebar() -> None:
             st.markdown(f"- {commodity}")
         st.divider()
         st.caption(f"Database: `{DB_PATH.name}`")
-        st.caption(f"BIG E Elite · {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        st.caption(f"{TAGLINE} · {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
 
 def render_target_lane_banner() -> None:
@@ -1058,22 +1125,35 @@ def render_dashboard_tab() -> None:
 
     render_target_lane_banner()
 
-    st.info(
-        "**Mission:** Build loaded miles from Spruce Pine, NC to Central Georgia "
-        "(Kohler area). Every empty mile is margin lost — prioritize backhauls, "
-        "feldspar/quartz shippers on Hwy 19E & 226, and lane rates that cover "
-        "fuel + deadhead."
-    )
+    st.info(f"**{CARRIER_NAME} Mission:** {MISSION_BLURB}")
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric(
-        "Hot Leads Contacted",
-        metrics["hot_leads_contacted"],
-        help="Leads with status other than New",
+    loaded_pct = metrics["loaded_share"]
+    loaded_delta = (
+        f"{(loaded_pct - LOADED_MILE_TARGET):.0%} vs target"
+        if loaded_pct > 0
+        else f"Target {LOADED_MILE_TARGET:.0%}"
     )
-    kpi2.metric("Total Loads Logged", metrics["loads_logged"])
-    kpi3.metric("Pipeline Revenue", f"${metrics['pipeline_revenue']:,.0f}")
-    kpi4.metric("Avg Rate per Ton", f"${metrics['avg_rate_per_ton']:.2f}")
+    kpi1.metric(
+        "Loaded Mile Share",
+        f"{loaded_pct:.0%}",
+        delta=loaded_delta,
+        delta_color="normal" if loaded_pct >= LOADED_MILE_TARGET else "inverse",
+        help=f"Lawson target ≥ {LOADED_MILE_TARGET:.0%} on Spruce Pine → Kohler lane",
+    )
+    kpi2.metric("Pipeline Revenue", f"${metrics['pipeline_revenue']:,.0f}")
+    kpi3.metric(
+        "Deadhead Miles",
+        f"{metrics['deadhead_miles']:,.0f}",
+        help="Empty miles on logged loads — minimize for margin",
+    )
+    kpi4.metric("Avg Rate / Ton", f"${metrics['avg_rate_per_ton']:.2f}")
+
+    kpi5, kpi6, kpi7, kpi8 = st.columns(4)
+    kpi5.metric("Hot / Active Leads", metrics["hot_leads"])
+    kpi6.metric("Loads Logged", metrics["loads_logged"])
+    kpi7.metric("In Transit / Dispatched", metrics["in_transit"])
+    kpi8.metric("Primary Receiver", PRIMARY_RECEIVER[:16])
 
     st.markdown("#### Quick Actions")
     action1, action2, action3, action4 = st.columns(4)
@@ -1428,6 +1508,7 @@ def render_load_logger_tab() -> None:
     destination = st.text_input(
         "Destination",
         value=prefill.get("destination", PRIMARY_LANE["destination"]),
+        placeholder=f"{PRIMARY_RECEIVER} / Kohler area",
         key="load_destination",
     )
     notes = st.text_area(
@@ -1769,7 +1850,7 @@ def render_gps_tracking_tab() -> None:
     st.subheader("GPS")
     st.caption("Traccar live positions · geofence alerts · Spruce Pine → Central GA simulation")
 
-    client = TraccarClient()
+    client = get_traccar_client()
     live_sim = st.toggle(
         "Live route simulation",
         value=st.session_state.get("gps_live_sim", "1") == "1",
@@ -1789,7 +1870,7 @@ def render_gps_tracking_tab() -> None:
     if using_sim:
         lat, lon, location_label = interpolate_route(st.session_state.gps_sim_progress)
         speed = 58.0
-        device_name = "L&P End-Dump (Sim)"
+        device_name = f"{TRUCK_LABEL} (Sim)"
         st.markdown(
             '<span class="lf-gps-badge sim">● SIMULATION</span>',
             unsafe_allow_html=True,
@@ -1812,10 +1893,7 @@ def render_gps_tracking_tab() -> None:
     m3.metric("Speed", f"{speed:.0f} mph")
     m4.metric("Location", location_label[:28])
 
-    geofences = [
-        ("Spruce Pine Yard", 35.912, -82.064, 0.8),
-        ("Kohler Central GA", 32.98, -82.72, 5.0),
-    ]
+    geofences = LAWSON_GEOFENCES
 
     def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         from math import asin, cos, radians, sin, sqrt
@@ -2098,7 +2176,7 @@ def render_bol_generator_tab() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Lawson Freight Platform",
+        page_title=PAGE_TITLE,
         page_icon="🚛",
         layout="wide",
     )
@@ -2110,13 +2188,6 @@ def main() -> None:
     if st.session_state.active_tab not in TAB_OPTIONS:
         st.session_state.active_tab = "Dashboard"
 
-    if not DB_PATH.exists():
-        st.error(
-            f"`{DB_PATH}` not found. Run the main L & P Freight app once (`run.ps1`) "
-            "to initialize lp_dispatch.db, then relaunch this app."
-        )
-        st.stop()
-
     night_mode = False
     try:
         from lp_helpers.database import init_db
@@ -2126,11 +2197,13 @@ def main() -> None:
         night_mode = is_night_mode()
         with st.sidebar:
             st.markdown('<div class="nav-group-label">Mission Control</div>', unsafe_allow_html=True)
+            st.markdown(f"**{CARRIER_NAME}**")
             st.write("**Spruce Pine NC → Central GA**")
-            st.write("**39ft Frameless End-Dump**")
+            st.write(f"**{TRAILER_DESC}**")
+            render_lawson_sidebar_extras()
             st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
             render_day_night_toggle()
-            st.caption(f"{APP_VERSION} · GPS · Alerts · BOL")
+            st.caption(f"{APP_VERSION} · {get_active_owner()} · GPS · Alerts")
         inject_road_css()
         if night_mode:
             inject_elite_dark_css()
@@ -2140,10 +2213,8 @@ def main() -> None:
     else:
         init_database()
 
-    st.title("Lawson Freight Platform — BIG E Elite Refresh")
-    st.caption(
-        f"Spruce Pine, NC — 39ft frameless end-dump · {APP_VERSION} · {DB_PATH.name}"
-    )
+    st.title(PLATFORM_TITLE)
+    st.caption(f"{TAGLINE} · {TRAILER_DESC} · {APP_VERSION} · {DB_PATH.name}")
 
     selected_tab = st.radio(
         "Navigation",
@@ -2170,7 +2241,7 @@ def main() -> None:
     elif selected_tab == "Alerts":
         render_alerts_tab()
 
-    st.caption("BIG E Elite Refresh — Stable, Automated, Competitive")
+    st.caption(f"{CARRIER_NAME} — optimized for Phillip & Lawson · local-first · {DB_PATH.name}")
 
 
 if __name__ == "__main__":
