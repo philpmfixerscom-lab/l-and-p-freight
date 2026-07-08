@@ -171,8 +171,35 @@ def test_emergency_sms_blocklist():
     assert is_sms_blocked_number("+1911")
     assert is_sms_blocked_number("988")
     assert is_sms_blocked_number("511")
+    assert is_sms_blocked_number("18008325660")
     assert not is_sms_blocked_number("+18285551234")
-    assert any(d["id"] == "911" for d in OFFICIAL_EMERGENCY_DIAL)
+    dial_ids = {d["id"] for d in OFFICIAL_EMERGENCY_DIAL}
+    assert "911" in dial_ids
+    assert "fmcsa" in dial_ids
+    assert "poison" in dial_ids
+    assert "phillip_phone" not in dial_ids
+    assert "lawson_phone" not in dial_ids
+
+
+def test_new_load_logged_sms_template():
+    import app as platform
+
+    msg = platform.format_sms(
+        "new_load_logged",
+        {
+            "shipper": "Sibelco",
+            "commodity": "Feldspar",
+            "weight_tons": 24.0,
+            "bol_number": "LP-TEST-002",
+            "status": "Potential",
+            "origin": "Spruce Pine, NC",
+            "destination": "Central Georgia (Kohler area)",
+            "driver": "Phillip",
+        },
+    )
+    assert "NEW LOAD" in msg
+    assert "Sibelco" in msg
+    assert "LP-TEST-002" in msg
 
 
 def test_bol_pdf_generation():

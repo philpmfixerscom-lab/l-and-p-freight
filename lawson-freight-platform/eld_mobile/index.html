@@ -1,0 +1,160 @@
+"""
+ELD / Driver Mobile View — minimal self-contained web app.
+
+Shows:
+- Current dispatch / BOL
+- In-cab bill info
+- HOS clock
+- Stub location
+
+Run: python -m http.server 8080 from ./eld_mobile
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import random
+from datetime import datetime
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+STUB_DATA_PATH = BASE_DIR / "stub_data.json"
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _seed_stub_data() -> dict[str, Any]:
+    if STUB_DATA_PATH.exists():
+        return json.loads(STUB_DATA_PATH.read_text())
+    data = {
+        "driver": "Phillip / Lawson",
+        "vehicle": "39ft End-Dump + Tractor",
+        "current_load": {
+            "bol_number": "LP-20260706001",
+            "shipper": "Sibelco",
+            "commodity": "Feldspar",
+            "weight_tons": 24,
+            "origin": "Spruce Pine, NC",
+            "destination": "Central Georgia (Kohler)",
+            "status": "In Transit",
+            "rate_per_ton": 48.0,
+            "total_revenue": 1152.0,
+        },
+        "location": {
+            "lat": 35.912,
+            "lon": -82.064,
+            "speed_mph": 58.0,
+            "heading_deg": 185.0,
+        },
+        "hos": {
+            "hours_today": 3.5,
+            "hours_week": 22.0,
+            "drive_remaining_hours": 7.5,
+            "on_duty_remaining_hours": 10.5,
+            "cycle_remaining_hours": 38.0,
+        },
+    }
+    STUB_DATA_PATH.write_text(json.dumps(data, indent=2))
+    return data
+
+
+def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 3958.8
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(min(1.0, a)))
+
+
+DEST_LAT = 32.98
+DEST_LON = -82.72
+
+
+def render_driver_mobile() -> str:
+    data = _seed_stub_data()
+    loc = data["location"]
+    miles_to_dest = _haversine_miles(loc["lat"], loc["lon"], DEST_LAT, DEST_LON)
+    eta_hours = miles_to_dest / max(loc["speed_mph"], 1.0)
+    eta = datetime.now().strftime("%I:%M %p") if eta_hours < 0.1 else (
+        datetime.now().timestamp() + eta_hours * 3600
+    )
+    eta_str = datetime.fromtimestamp(eta).strftime("%I:%M %p") if isinstance(eta, float) else eta
+
+    hos = data["hos"]
+    hos_items = [
+        ("Drive remaining", f"{hos['drive_remaining_hours']}h"),
+        ("On-duty remaining", f"{hos['on_duty_remaining_hours']}h"),
+        ("Cycle remaining", f"{hos['cycle_remaining_hours']}h"),
+        ("Hours today", f"{hos['hours_today']}h"),
+        ("Hours week", f"{hos['hours_week']}h"),
+    ]
+
+    load = data["current_load"]
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L & P Driver</title>
+<style>
+  body {{ background:#0b1628; color:#f1f5f9; font-family: system-ui, -apple-system, sans-serif; margin:0; padding:1rem; }}
+  .card {{ background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1rem; margin-bottom:1rem; }}
+  .label {{ font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8; }}
+  .value {{ font-size:1.25rem; font-weight:700; color:#e2e8f0; }}
+  .row {{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; }}
+  .pill {{ display:inline-block; padding:0.2rem 0.6rem; border-radius:999px; background:#0ea5e9; color:#022c43; font-weight:700; font-size:0.8rem; }}
+  .muted {{ color:#94a3b8; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="label">Driver</div>
+    <div class="value">{data['driver']}</div>
+    <div class="muted">{data['vehicle']}</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="label">Speed</div>
+        <div class="value">{loc['speed_mph']:.0f} mph</div>
+      </div>
+      <div>
+        <div class="label">Heading</div>
+        <div class="value">{loc['heading_deg']:.0f}°</div>
+      </div>
+    </div>
+    <div style="margin-top:0.75rem">
+      <div class="label">ETA {load['destination']}</div>
+      <div class="value">{eta_str} · {miles_to_dest:.0f} mi</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Current Load</div>
+    <div class="value">{load['bol_number']}</div>
+    <div class="muted">{load['shipper']} · {load['commodity']} · {load['weight_tons']}t</div>
+    <div class="muted">{load['origin']} → {load['destination']}</div>
+    <div style="margin-top:0.5rem"><span class="pill">{load['status']}</span></div>
+  </div>
+
+  <div class="card">
+    <div class="label">HOS</div>
+    <div class="row">
+      {''.join(f'<div><div class="label">{k}</div><div class="value">{v}</div></div>' for k,v in hos_items)}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Billing</div>
+    <div class="value">${load['total_revenue']:,.2f}</div>
+    <div class="muted">${load['rate_per_ton']:.2f}/ton · {load['weight_tons']} tons</div>
+  </div>
+</body>
+</html>
+"""

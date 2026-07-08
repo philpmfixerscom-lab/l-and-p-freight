@@ -1,0 +1,27 @@
+[server]
+headless = true
+address = "0.0.0.0"
+port = 8501
+baseUrlPath = "app"
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false
+serverAddress = "0.0.0.0"
+serverPort = 8501
+
+[theme]
+primaryColor = "#e85d04"
+backgroundColor = "#d4dce8"
+secondaryBackgroundColor = "#e8edf4"
+textColor = "#0f172a"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false
+
+[runner]
+fastReruns = true

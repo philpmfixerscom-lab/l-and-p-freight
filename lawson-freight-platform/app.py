@@ -121,6 +121,7 @@ FILTER_DEFAULTS: dict[str, str] = {
     "filter_loads_search": "",
     "gps_live_sim": "1",
     "sms_auto_send": "0",
+    "sms_auto_new_load": "1",
 }
 
 SIM_ROUTE: list[tuple[float, float, str]] = LAWSON_SIM_ROUTE
@@ -167,6 +168,12 @@ SMS_TEMPLATES: dict[str, str] = {
         "BOL {bol_number} generated for {shipper}\n"
         "{commodity} · {weight_tons:.1f}t\n"
         "Pickup {pickup_date} · {origin} → {destination}"
+    ),
+    "new_load_logged": (
+        "L & P FREIGHT | NEW LOAD\n"
+        "{shipper} · {commodity} · {weight_tons:.1f}t\n"
+        "BOL {bol_number} · {status}\n"
+        "{origin} → {destination}"
     ),
 }
 
@@ -304,10 +311,9 @@ def format_sms(template_key: str, context: dict[str, Any]) -> str:
         "bol_number": "DRAFT",
         "shipper": "Shipper",
         "pickup_date": str(date.today()),
-        "driver": get_active_owner(),
     }
     defaults.update(context)
-    if "driver" not in context:
+    if "driver" not in defaults:
         defaults["driver"] = get_active_owner()
     try:
         return template.format(**defaults)
@@ -437,33 +443,15 @@ def log_sms_event(
         conn.commit()
 
 
-def _emergency_contact_phones() -> list[str]:
-    from lp_helpers.emergency_alerts import is_sms_blocked_number
-
-    numbers: list[str] = []
-    for key in ("dispatch_phone", "phillip_phone", "lawson_phone"):
-        raw = get_secret("emergency", key, "")
-        if raw.strip():
-            normalized = normalize_phone(raw.strip())
-            if not is_sms_blocked_number(normalized):
-                numbers.append(normalized)
-    seen: set[str] = set()
-    unique: list[str] = []
-    for n in numbers:
-        if n and n not in seen:
-            seen.add(n)
-            unique.append(n)
-    return unique
-
-
 def dispatch_emergency(
     emergency_key: str,
     message: str,
     context: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Log emergency, annotate active load, optionally SMS dispatch contacts."""
+    """Log incident and annotate active load — no personal SMS; drivers call official numbers."""
     log_sms_event(None, f"emergency_{emergency_key}", message, "emergency")
 
+    load_noted = False
     try:
         with closing(get_connection()) as conn:
             row = conn.execute(
@@ -481,34 +469,13 @@ def dispatch_emergency(
                     (note, row["id"]),
                 )
                 conn.commit()
+                load_noted = True
     except Exception as exc:
         log.warning("Emergency load note failed: %s", exc)
 
-    phones = _emergency_contact_phones()
-    auto_send = get_secret("emergency", "auto_send", "1") == "1"
-    if not phones:
-        return False, (
-            "Emergency logged — add Phillip/Lawson cell numbers in [emergency] secrets "
-            "(911 is voice-only; use the CALL 911 button above)."
-        )
-    if not auto_send:
-        return False, f"Emergency logged — auto-send off. Text manually: {', '.join(phones)}"
-
-    sent = 0
-    errors: list[str] = []
-    for phone in phones:
-        try:
-            tw_sid = send_twilio_notification(phone, message)
-            log_sms_event(None, f"emergency_{emergency_key}", message, "twilio", tw_sid)
-            sent += 1
-        except Exception as exc:
-            errors.append(str(exc))
-    if sent:
-        msg = f"Emergency SMS sent to {sent} contact(s)."
-        if errors:
-            msg += f" ({len(errors)} failed)"
-        return True, msg
-    return False, f"Emergency logged but SMS failed: {errors[0] if errors else 'unknown'}"
+    if load_noted:
+        return True, "Incident logged on active load. Call official numbers above if you have not already."
+    return True, "Incident logged. Call official numbers above if you have not already."
 
 
 def _render_emergency_controls(
@@ -555,6 +522,24 @@ def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> None
         log_sms_event(None, "status_dispatched", body, "twilio", tw_sid)
     except Exception as exc:
         log.warning("Auto SMS skipped: %s", exc)
+
+
+def notify_dispatcher_new_load(load: dict[str, Any]) -> None:
+    auto_on = (
+        st.session_state.get("sms_auto_new_load", "1") == "1"
+        or get_secret("twilio", "auto_send_new_load", "1") == "1"
+    )
+    if not auto_on:
+        return
+    dispatch_phone = get_secret("twilio", "dispatch_phone", "+18284678218")
+    if not dispatch_phone.strip():
+        return
+    body = format_sms("new_load_logged", load)
+    try:
+        tw_sid = send_twilio_notification(dispatch_phone, body)
+        log_sms_event(None, "new_load_logged", body, "twilio", tw_sid)
+    except Exception as exc:
+        log.warning("Dispatcher new-load SMS skipped: %s", exc)
 
 
 def _traccar_connection_params() -> tuple[str, str, str, str]:
@@ -1746,6 +1731,7 @@ def render_load_logger_tab() -> None:
                 match = leads_df[leads_df["company"].astype(str).str.lower() == shipper.strip().lower()]
                 if not match.empty:
                     lead_phone = str(match.iloc[0].get("phone", ""))
+            notify_dispatcher_new_load(saved_load)
             maybe_auto_notify_load(saved_load, lead_phone)
             st.success(
                 f"Load saved — {load_status} · BOL {bol} · "
@@ -2297,7 +2283,7 @@ def render_gps_tracking_tab() -> None:
 
 def render_alerts_tab() -> None:
     st.subheader("Alerts")
-    st.caption("Twilio SMS · SMTP email · emergency dispatch · secure secrets.toml")
+    st.caption("Twilio SMS · SMTP email · driver emergency numbers · secure secrets.toml")
 
     _render_emergency_controls(key_prefix="alert_em")
 
@@ -2323,12 +2309,43 @@ def render_alerts_tab() -> None:
     else:
         status_cols[1].warning("SMTP not configured — add [smtp] to secrets.toml")
 
+    dispatch_phone = st.text_input(
+        "Dispatch Phone (E.164)",
+        value=get_secret("twilio", "dispatch_phone", "+18284678218"),
+        key="twilio_dispatch_phone",
+    )
+    if dispatch_phone != _local_get_setting("twilio_dispatch_phone", ""):
+        persist_setting("twilio_dispatch_phone", dispatch_phone)
+
+    auto_new_load = st.toggle(
+        "Auto-send SMS to dispatcher when new load is logged",
+        value=st.session_state.get("sms_auto_new_load", "1") == "1",
+        key="sms_auto_new_load_toggle",
+    )
+    save_filter("sms_auto_new_load", "1" if auto_new_load else "0")
+
     auto_send = st.toggle(
         "Auto-send SMS when load status is Dispatched / In Transit",
         value=st.session_state.get("sms_auto_send", "0") == "1",
         key="sms_auto_toggle",
     )
     save_filter("sms_auto_send", "1" if auto_send else "0")
+
+    if st.button("Send Test Alert", key="twilio_test_alert"):
+        try:
+            body = "L & P FREIGHT Alert: New load opportunity ready."
+            tw_sid = send_twilio_notification(dispatch_phone, body)
+            log_sms_event(None, "test_alert", body, "twilio", tw_sid)
+            st.success("Test SMS sent!")
+        except Exception as exc:
+            st.error(str(exc))
+
+    st.markdown("#### Automation Rules")
+    st.write("• **New Load Logged** → SMS to dispatcher")
+    st.write("• **Load Status Dispatched / In Transit** → SMS to shipper lead")
+    st.write("• **BOL Ready** → Logged + optional notify")
+
+    st.divider()
 
     leads_df = fetch_leads()
     lead_map = {

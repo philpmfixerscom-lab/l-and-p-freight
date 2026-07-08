@@ -1,4 +1,4 @@
-"""Emergency dispatch — official 911 dial pad + L & P dispatch SMS alerts."""
+"""Driver emergency panel — official tap-to-call numbers + incident logging."""
 
 from __future__ import annotations
 
@@ -58,12 +58,28 @@ OFFICIAL_EMERGENCY_DIAL: list[dict[str, str]] = [
         "note": "National Response Center — chemical/spill emergencies",
         "priority": "high",
     },
+    {
+        "id": "fmcsa",
+        "label": "FMCSA Safety Hotline",
+        "tel": "18008325660",
+        "display": "1-800-832-5660",
+        "note": "Unsafe driving · hours-of-service · carrier safety violations",
+        "priority": "normal",
+    },
+    {
+        "id": "poison",
+        "label": "Poison Control",
+        "tel": "18002221222",
+        "display": "1-800-222-1222",
+        "note": "Chemical exposure · ingestion · medical guidance",
+        "priority": "high",
+    },
 ]
 
-# Numbers that must never receive Twilio SMS
+# Numbers that must never receive Twilio SMS (general alerts guard)
 SMS_BLOCKLIST_DIGITS = frozenset({
     "911", "988", "511", "447", "477", "47",
-    "18006227956", "18004248802",
+    "18006227956", "18004248802", "18008325660", "18002221222",
 })
 
 EMERGENCY_TYPES: dict[str, dict[str, Any]] = {
@@ -73,7 +89,7 @@ EMERGENCY_TYPES: dict[str, dict[str, Any]] = {
         "short": "MEDICAL",
         "severity": "critical",
         "call_first": "911",
-        "also_dial": ["988"],
+        "also_dial": ["988", "poison"],
     },
     "truck_breakdown": {
         "label": "Truck Malfunction",
@@ -81,7 +97,7 @@ EMERGENCY_TYPES: dict[str, dict[str, Any]] = {
         "short": "TRUCK DOWN",
         "severity": "high",
         "call_first": None,
-        "also_dial": ["nc_hp", "ga_gsp", "road_511"],
+        "also_dial": ["nc_hp", "ga_gsp", "road_511", "fmcsa"],
     },
     "load_issue": {
         "label": "Load Issue",
@@ -89,7 +105,7 @@ EMERGENCY_TYPES: dict[str, dict[str, Any]] = {
         "short": "LOAD ISSUE",
         "severity": "high",
         "call_first": None,
-        "also_dial": ["hazmat", "road_511"],
+        "also_dial": ["hazmat", "poison", "road_511"],
     },
     "roadside_sos": {
         "label": "Roadside SOS",
@@ -97,12 +113,12 @@ EMERGENCY_TYPES: dict[str, dict[str, Any]] = {
         "short": "SOS",
         "severity": "critical",
         "call_first": "911",
-        "also_dial": ["nc_hp", "ga_gsp"],
+        "also_dial": ["nc_hp", "ga_gsp", "road_511"],
     },
 }
 
-EMERGENCY_SMS_TEMPLATE = (
-    "🚨 L & P EMERGENCY | {short}\n"
+INCIDENT_LOG_TEMPLATE = (
+    "L & P INCIDENT | {short}\n"
     "Driver: {driver}\n"
     "Unit: {truck_label}\n"
     "BOL: {bol_number}\n"
@@ -111,8 +127,7 @@ EMERGENCY_SMS_TEMPLATE = (
     "GPS: {gps_text}\n"
     "Detail: {detail}\n"
     "Time: {timestamp}\n"
-    "⚠️ Life-threatening: CALL 911 (not SMS)\n"
-    "— Phillip / Lawson Dispatch"
+    "⚠️ Life-threatening: CALL 911 (not SMS)"
 )
 
 
@@ -156,10 +171,10 @@ def format_emergency_message(context: dict[str, Any]) -> str:
     }
     defaults.update(context)
     try:
-        return EMERGENCY_SMS_TEMPLATE.format(**defaults)
+        return INCIDENT_LOG_TEMPLATE.format(**defaults)
     except (KeyError, ValueError):
         return (
-            f"L & P EMERGENCY — {defaults.get('short')} — "
+            f"L & P INCIDENT — {defaults.get('short')} — "
             f"{defaults.get('driver')} — {defaults.get('detail')}"
         )
 
@@ -181,13 +196,13 @@ def build_emergency_context(
             f"({gps_fix.get('speed_mph', 0):.0f} mph)"
         )
     else:
-        gps_text = "GPS unavailable — check Traccar or call driver"
+        gps_text = "GPS unavailable — check Traccar or mile marker"
 
     default_details = {
-        "medical": "Driver needs immediate medical assistance — 911 called or requested.",
+        "medical": "Driver needs immediate medical assistance — call 911.",
         "truck_breakdown": "Truck/trailer mechanical failure — roadside assistance needed.",
         "load_issue": "Load problem — shift, spill, scale, or shipper/receiver issue.",
-        "roadside_sos": "General roadside emergency — driver requests immediate help.",
+        "roadside_sos": "General roadside emergency — call highway patrol or 911.",
     }
     return {
         "short": meta["short"],
@@ -264,7 +279,7 @@ def render_official_dial_pad(
             unsafe_allow_html=True,
         )
 
-    show = priority + rest if not compact else priority + rest[:3]
+    show = priority + rest if not compact else priority + rest[:4]
     cols = st.columns(2)
     for idx, entry in enumerate(show):
         if entry["id"] == "911":
@@ -291,13 +306,13 @@ def render_emergency_panel(
     compact: bool = False,
     key_prefix: str = "emergency",
 ) -> None:
-    """Official dial pad + L & P dispatch SMS buttons (confirm step)."""
+    """Official dial pad + incident-type quick links (optional log for records)."""
     st.markdown(_emergency_css(compact), unsafe_allow_html=True)
     st.markdown(
         '<div class="lf-emergency-banner">'
         "<h4>🚨 Emergency</h4>"
-        "<p><b>Step 1:</b> Call 911 / Highway Patrol below if needed. "
-        "<b>Step 2:</b> Alert Phillip &amp; Lawson dispatch (SMS).</p>"
+        "<p><b>Call the official numbers below.</b> "
+        "Use incident buttons for recommended dial links — logging is optional and for your records only.</p>"
         "</div>"
         '<div class="lf-emergency-marker"></div>',
         unsafe_allow_html=True,
@@ -305,8 +320,8 @@ def render_emergency_panel(
 
     render_official_dial_pad(key_prefix=f"{key_prefix}_dial", compact=compact)
 
-    st.markdown("##### 📲 Alert L & P Dispatch")
-    st.caption("Texts Phillip/Lawson — does **not** replace calling 911.")
+    st.markdown("##### 🆘 What happened?")
+    st.caption("Shows numbers to call for this situation. Optionally log details on the active load.")
 
     confirm_key = f"{key_prefix}_confirm"
     pending = st.session_state.get(confirm_key)
@@ -319,7 +334,7 @@ def render_emergency_panel(
             if dial:
                 st.error(
                     f"**If this is life-threatening, call {dial['display']} FIRST** "
-                    "before or while alerting dispatch."
+                    "before logging anything."
                 )
                 st.link_button(
                     f"📞 CALL {dial['display']} NOW",
@@ -337,9 +352,9 @@ def render_emergency_panel(
                     help=extra["note"],
                 )
 
-        st.warning(
-            f"Confirm **{meta.get('label', pending)}** dispatch alert? "
-            "This logs the event and texts your L & P contacts."
+        st.info(
+            f"**{meta.get('label', pending)}** — call the numbers above as needed. "
+            "Logging saves a note on your active load for later reference."
         )
         detail = st.text_input(
             "Additional detail (optional)",
@@ -347,7 +362,7 @@ def render_emergency_panel(
             key=f"{key_prefix}_detail_{pending}",
         )
         c1, c2 = st.columns(2)
-        if c1.button("✅ Alert Dispatch", type="primary", use_container_width=True, key=f"{key_prefix}_yes"):
+        if c1.button("📝 Log incident", type="primary", use_container_width=True, key=f"{key_prefix}_yes"):
             ctx = build_emergency_context(
                 pending,
                 driver=driver,
@@ -357,9 +372,9 @@ def render_emergency_panel(
                 detail=detail,
             )
             msg = format_emergency_message(ctx)
-            sent_ok, status = on_dispatch(pending, msg, ctx)
+            logged_ok, status = on_dispatch(pending, msg, ctx)
             st.session_state.pop(confirm_key, None)
-            if sent_ok:
+            if logged_ok:
                 st.success(status)
             else:
                 st.warning(status)

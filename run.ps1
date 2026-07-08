@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
-Set-Location -LiteralPath $PSScriptRoot
+$platformRoot = Join-Path $PSScriptRoot "lawson-freight-platform"
+Set-Location -LiteralPath $platformRoot
 
 $venvPath = Join-Path $PSScriptRoot ".venv"
 $pythonExe = Join-Path $venvPath "Scripts\python.exe"
@@ -43,7 +44,7 @@ if (-not (Test-CompatibleVenv)) {
 
 Write-Host "Installing/updating dependencies..." -ForegroundColor Cyan
 & $pythonExe -m pip install --upgrade pip
-& $pythonExe -m pip install -r (Join-Path $PSScriptRoot "requirements.txt")
+& $pythonExe -m pip install -r (Join-Path $platformRoot "requirements.txt")
 
 # Kill stale instance on 8502 (duplicate listeners cause 404 in browser)
 $ErrorActionPreference = 'Continue'
@@ -53,6 +54,6 @@ Start-Sleep -Seconds 1
 $ErrorActionPreference = 'Stop'
 
 $appUrl = "http://127.0.0.1:8502"
-Write-Host ('Starting L and P Freight Platform at ' + $appUrl) -ForegroundColor Green
+Write-Host ('Starting L and P Dispatch — Lawson Freight Platform at ' + $appUrl) -ForegroundColor Green
 Write-Host ('Open ' + $appUrl + ' in your browser. If you see 404, wait 5 sec and refresh.') -ForegroundColor Yellow
-& $pythonExe -m streamlit run (Join-Path $PSScriptRoot 'app.py') --server.address 127.0.0.1 --server.port 8502 --server.headless false
+& $pythonExe -m streamlit run (Join-Path $platformRoot 'app.py') --server.address 127.0.0.1 --server.port 8502 --server.headless false
