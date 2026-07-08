@@ -50,7 +50,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "lp_dispatch.db"
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
-APP_VERSION = "4.3 BIG E"
+APP_VERSION = "4.4 BIG E"
 
 try:
     from lp_helpers.lawson_profile import (
@@ -107,11 +107,12 @@ TAB_LABELS = [
     "📊 Dashboard",
     "👥 Leads",
     "📝 Logger",
+    "📦 Board",
     "🗺️ GPS",
     "📄 BOL",
     "📲 Alerts",
 ]
-TAB_KEYS = ["Dashboard", "Leads", "Logger", "GPS", "BOL", "Alerts"]
+TAB_KEYS = ["Dashboard", "Leads", "Logger", "Board", "GPS", "BOL", "Alerts"]
 
 FILTER_DEFAULTS: dict[str, str] = {
     "filter_leads_status": "All",
@@ -452,58 +453,25 @@ def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> None
         log.warning("Auto SMS skipped: %s", exc)
 
 
-class TraccarClient:
-    """Traccar REST client with graceful simulation fallback."""
+def get_traccar_live() -> Any:
+    from lp_helpers.traccar_live import TraccarLive
 
-    def __init__(self) -> None:
-        self.base_url = get_secret("traccar", "url", "http://localhost:8082").rstrip("/")
-        self.email = get_secret("traccar", "email", "admin")
-        self.password = get_secret("traccar", "password", "admin")
-        self._session = requests.Session() if requests else None
-
-    @property
-    def configured(self) -> bool:
-        return bool(self.base_url and requests is not None)
-
-    def _login(self) -> None:
-        if not self._session:
-            raise RuntimeError("requests package not installed")
-        resp = self._session.post(
-            f"{self.base_url}/api/session",
-            data={"email": self.email, "password": self.password},
-            timeout=8,
-        )
-        resp.raise_for_status()
-
-    def fetch_positions(self) -> list[dict[str, Any]]:
-        if not self.configured:
-            return []
-        try:
-            self._login()
-            resp = self._session.get(f"{self.base_url}/api/positions", timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
-            return data if isinstance(data, list) else []
-        except Exception as exc:
-            log.info("Traccar unavailable (%s) — using simulation", exc)
-            return []
-
-    def fetch_devices(self) -> list[dict[str, Any]]:
-        if not self.configured:
-            return []
-        try:
-            self._login()
-            resp = self._session.get(f"{self.base_url}/api/devices", timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
-            return data if isinstance(data, list) else []
-        except Exception:
-            return []
+    return TraccarLive(get_secret=get_secret)
 
 
-@st.cache_resource(show_spinner=False)
-def get_traccar_client() -> TraccarClient:
-    return TraccarClient()
+@st.cache_data(ttl=20, show_spinner=False)
+def _cached_traccar_fix(device_id: int | None) -> dict[str, Any] | None:
+    return get_traccar_live().get_live_fix(device_id)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_traccar_devices() -> list[dict[str, Any]]:
+    return get_traccar_live().fetch_devices()
+
+
+def clear_traccar_cache() -> None:
+    _cached_traccar_fix.clear()
+    _cached_traccar_devices.clear()
 
 
 def interpolate_route(progress: float) -> tuple[float, float, str]:
@@ -1100,6 +1068,9 @@ def render_sidebar() -> None:
             st.markdown(f"- {commodity}")
         st.divider()
         st.caption(f"Database: `{DB_PATH.name}`")
+        if st.button("📱 Driver App", use_container_width=True):
+            st.session_state.view_mode = "driver"
+            st.rerun()
         if BIG_E_MODE:
             st.caption(f"**BIG E MODE** · {TAGLINE}")
         else:
@@ -1864,13 +1835,140 @@ def render_rate_calculator_tab(*, embedded: bool = False) -> None:
         st.dataframe(lane_rates_df, use_container_width=True, hide_index=True)
 
 
+def render_load_board_tab() -> None:
+    st.subheader("Load Board")
+    st.caption("BulkLoads NC/GA intel · log opportunities · minimize deadhead on Spruce Pine → Kohler")
+
+    from lp_helpers.load_board import (
+        NC_GA_MARKET_INTEL,
+        fetch_opportunities,
+        insert_opportunity,
+    )
+
+    render_target_lane_banner()
+
+    with st.form("board_opportunity"):
+        c1, c2 = st.columns(2)
+        lane = c1.text_input(
+            "Lane",
+            value=f"{PRIMARY_LANE['origin']} → {PRIMARY_LANE['destination']}",
+        )
+        commodity = c2.selectbox("Commodity", APPROVED_COMMODITIES)
+        c3, c4 = st.columns(2)
+        rate = c3.text_input("Rate", placeholder="$48/ton")
+        contact = c4.text_input("Contact", placeholder="Broker / shipper phone")
+        notes = st.text_area("Notes", placeholder="Weight, equipment, pickup window…")
+        if st.form_submit_button("Save Opportunity", type="primary", use_container_width=True):
+            if lane.strip():
+                try:
+                    with closing(get_connection()) as conn:
+                        insert_opportunity(
+                            conn,
+                            lane=lane.strip(),
+                            commodity=commodity,
+                            rate=rate.strip(),
+                            contact=contact.strip(),
+                            notes=notes.strip(),
+                            source="manual",
+                        )
+                        conn.commit()
+                    st.success(f"Saved — {lane}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            else:
+                st.error("Lane is required.")
+
+    st.markdown("#### NC/GA End-Dump Market Intel")
+    if st.button("Refresh BulkLoads Intel", use_container_width=True):
+        st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
+        for item in NC_GA_MARKET_INTEL:
+            try:
+                with closing(get_connection()) as conn:
+                    insert_opportunity(
+                        conn,
+                        lane=item["lane"],
+                        commodity=item["commodity"],
+                        rate=item["rate"],
+                        contact=item["contact"],
+                        notes=item.get("notes", ""),
+                        source="bulkloads_intel",
+                    )
+                    conn.commit()
+            except Exception:
+                pass
+        st.success(f"Refreshed {len(NC_GA_MARKET_INTEL)} listings into opportunities.")
+        st.rerun()
+
+    refreshed = st.session_state.get("load_board_refreshed", "Not refreshed this session")
+    st.caption(f"Last refresh: {refreshed}")
+
+    for item in NC_GA_MARKET_INTEL:
+        st.markdown(
+            f"**{item['commodity']}** · {item['lane']} · "
+            f"**{item['rate']}** · {item['contact']}  \n"
+            f"_{item['notes']}_"
+        )
+
+    st.markdown("#### Saved Opportunities")
+    try:
+        with closing(get_connection()) as conn:
+            opps_df = fetch_opportunities(conn)
+    except Exception:
+        opps_df = pd.DataFrame()
+    if opps_df.empty:
+        st.info("No opportunities yet — refresh intel or log one above.")
+    else:
+        show = [c for c in ["lane", "commodity", "rate", "contact", "source", "created_at"] if c in opps_df.columns]
+        st.dataframe(opps_df[show], use_container_width=True, hide_index=True)
+
+        st.markdown("#### Book to Logger")
+        labels = [
+            f"{r.get('commodity', '?')} — {r.get('lane', '?')}"
+            for _, r in opps_df.iterrows()
+        ]
+        pick = st.selectbox("Opportunity", labels)
+        if st.button("Pre-fill Logger", use_container_width=True):
+            row = opps_df.iloc[labels.index(pick)].to_dict()
+            parts = str(row.get("lane", "")).split("→")
+            dest = parts[-1].strip() if len(parts) > 1 else PRIMARY_LANE["destination"]
+            prefill_load_logger(
+                shipper=row.get("contact", ""),
+                commodity=row.get("commodity", "Feldspar"),
+                destination=dest,
+                notes=row.get("notes", ""),
+                status="Potential",
+            )
+
+
 def render_gps_tracking_tab() -> None:
     st.subheader("GPS")
-    st.caption("Traccar live positions · geofence alerts · Spruce Pine → Central GA simulation")
+    st.caption("Live Traccar hookup · geofence alerts · Spruce Pine → Central GA simulation fallback")
 
-    client = get_traccar_client()
+    traccar = get_traccar_live()
+    conn_status = traccar.connection_status()
+    status_col1, status_col2 = st.columns([2, 1])
+    if conn_status["ok"]:
+        status_col1.success(f"Traccar LIVE — {conn_status.get('message', 'connected')}")
+    else:
+        status_col1.warning(f"Traccar: {conn_status.get('message', 'offline')} — simulation available")
+
+    devices = _cached_traccar_devices() if conn_status["ok"] else []
+    device_options: dict[str, int | None] = {"Auto (online device)": None}
+    for d in devices:
+        label = f"{d.get('name', 'Device')} ({d.get('status', '?')})"
+        device_options[label] = int(d["id"])
+
+    selected_device_label = status_col2.selectbox(
+        "Traccar device",
+        list(device_options.keys()),
+        key="traccar_device_pick",
+    )
+    device_id = device_options[selected_device_label]
+
+    live_poll = st.toggle("Live Traccar poll (20s cache)", value=True, key="gps_live_poll")
     live_sim = st.toggle(
-        "Live route simulation",
+        "Route simulation fallback",
         value=st.session_state.get("gps_live_sim", "1") == "1",
         key="gps_sim_toggle",
     )
@@ -1881,9 +1979,8 @@ def render_gps_tracking_tab() -> None:
     if live_sim:
         st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.03) % 1.0
 
-    positions = client.fetch_positions()
-    devices = client.fetch_devices()
-    using_sim = not positions
+    fix = _cached_traccar_fix(device_id) if live_poll and conn_status["ok"] else None
+    using_sim = fix is None
 
     if using_sim:
         lat, lon, location_label = interpolate_route(st.session_state.gps_sim_progress)
@@ -1894,16 +1991,22 @@ def render_gps_tracking_tab() -> None:
             unsafe_allow_html=True,
         )
     else:
-        pos = positions[0]
-        lat = float(pos.get("latitude", SIM_ROUTE[0][0]))
-        lon = float(pos.get("longitude", SIM_ROUTE[0][1]))
-        speed = float(pos.get("speed", 0)) * 1.15078  # knots → mph approx
-        device_name = str(pos.get("deviceId", "Traccar device"))
-        location_label = f"Device {device_name}"
+        lat = fix["latitude"]
+        lon = fix["longitude"]
+        speed = fix["speed_mph"]
+        device_name = fix["device_name"]
+        location_label = device_name
         st.markdown(
             '<span class="lf-gps-badge live">● LIVE TRACCAR</span>',
             unsafe_allow_html=True,
         )
+        if st.button("Save fix to telematics", use_container_width=True):
+            try:
+                with closing(get_connection()) as conn:
+                    traccar.persist_telematics(conn, fix)
+                st.success("Position logged to telematics table.")
+            except Exception as exc:
+                st.error(str(exc))
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Latitude", f"{lat:.5f}")
@@ -1960,13 +2063,19 @@ def render_gps_tracking_tab() -> None:
         st.warning("Install folium + streamlit-folium for interactive map: pip install folium streamlit-folium")
         render_target_lane_banner()
 
-    with st.expander("Traccar connection"):
+    with st.expander("Traccar connection & setup"):
         st.code(
-            f"URL: {client.base_url}\nEmail: {client.email}\n"
-            f"Devices: {len(devices)} · Positions: {len(positions)}",
+            f"URL: {traccar.base_url}\nEmail: {traccar.email}\n"
+            f"Device ID (secrets): {traccar.preferred_device_id or 'auto'}\n"
+            f"Devices online: {sum(1 for d in devices if d.get('status') == 'online')}/{len(devices)}\n"
+            f"Mode: {conn_status.get('mode', '?')}",
             language="text",
         )
-        if st.button("Refresh GPS", use_container_width=True):
+        st.caption(
+            "Configure [traccar] in `.streamlit/secrets.toml` — set `device_id` to your end-dump tracker ID."
+        )
+        if st.button("Refresh GPS / clear cache", use_container_width=True):
+            clear_traccar_cache()
             st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.1) % 1.0
             st.rerun()
 
@@ -2192,6 +2301,23 @@ def render_bol_generator_tab() -> None:
         )
 
 
+def _driver_view_requested() -> bool:
+    try:
+        if st.query_params.get("view") == "driver":
+            return True
+    except Exception:
+        pass
+    return st.session_state.get("view_mode") == "driver"
+
+
+def _exit_driver_view() -> None:
+    st.session_state.view_mode = "dispatch"
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+
+
 def main() -> None:
     st.set_page_config(
         page_title=PAGE_TITLE,
@@ -2227,7 +2353,10 @@ def main() -> None:
                     'border-radius:12px;font-size:0.75rem;font-weight:700;">BIG E MODE</span>',
                     unsafe_allow_html=True,
                 )
-            st.caption(f"{APP_VERSION} · {get_active_owner()} · GPS · Alerts · BOL")
+            if st.button("📱 Driver App", use_container_width=True):
+                st.session_state.view_mode = "driver"
+                st.rerun()
+            st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")
         inject_road_css()
         if night_mode:
             inject_elite_dark_css()
@@ -2237,6 +2366,25 @@ def main() -> None:
     else:
         init_database()
 
+    if _driver_view_requested():
+        from lp_helpers.driver_mobile import render_driver_app
+
+        def _traccar_fix_for_driver() -> dict[str, Any] | None:
+            if get_traccar_live().connection_status().get("ok"):
+                return _cached_traccar_fix(None)
+            return None
+
+        render_driver_app(
+            get_connection=get_connection,
+            get_active_owner=get_active_owner,
+            truck_label=TRUCK_LABEL,
+            get_traccar_fix=_traccar_fix_for_driver,
+            format_sms=format_sms,
+            log_sms_event=log_sms_event,
+            on_exit=_exit_driver_view,
+        )
+        return
+
     st.title(f"🚛 {PLATFORM_TITLE}")
     st.caption(f"{TAGLINE} · {TRAILER_DESC} · {APP_VERSION} · `{DB_PATH.name}`")
 
@@ -2244,7 +2392,15 @@ def main() -> None:
     if nav_hint:
         st.info(nav_hint)
 
-    tab_dashboard, tab_leads, tab_logger, tab_gps, tab_bol, tab_alerts = st.tabs(TAB_LABELS)
+    (
+        tab_dashboard,
+        tab_leads,
+        tab_logger,
+        tab_board,
+        tab_gps,
+        tab_bol,
+        tab_alerts,
+    ) = st.tabs(TAB_LABELS)
 
     with tab_dashboard:
         render_dashboard_tab()
@@ -2252,6 +2408,8 @@ def main() -> None:
         render_leads_crm_tab()
     with tab_logger:
         render_load_logger_tab()
+    with tab_board:
+        render_load_board_tab()
     with tab_gps:
         render_gps_tracking_tab()
     with tab_bol:
