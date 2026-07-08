@@ -981,6 +981,10 @@ def init_db() -> None:
         if "voice_audio_path" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN voice_audio_path TEXT")
 
+        lead_cols = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
+        if "email" not in lead_cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN email TEXT")
+
         if conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0] == 0:
             for lead in SEED_LEADS:
                 conn.execute(

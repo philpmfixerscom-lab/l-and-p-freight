@@ -68,7 +68,7 @@ def fetch_active_load(get_connection: Callable[[], Any]) -> dict[str, Any]:
             ).fetchone()
         if row is None:
             return _default_load()
-        return dict(row)
+        return {k: row[k] for k in row.keys()}
     except Exception:
         return _default_load()
 

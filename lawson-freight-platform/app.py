@@ -669,7 +669,10 @@ def fetch_leads() -> pd.DataFrame:
                 conn,
             )
         if not df.empty:
-            df["notes"] = df["lane_notes"].fillna("")
+            if "lane_notes" in df.columns:
+                df["notes"] = df["lane_notes"].fillna("")
+            elif "notes" not in df.columns:
+                df["notes"] = ""
         return df
     except Exception as exc:
         log.exception("fetch_leads failed")
@@ -751,9 +754,15 @@ def compute_dashboard_metrics(
         avg_rate_per_ton = float(rates.mean()) if not rates.empty else 0.0
 
     miles_col = loads_df["miles"] if "miles" in loads_df.columns else pd.Series(0, index=loads_df.index)
-    loaded = float(loads_df["loaded_miles"].fillna(miles_col).fillna(0).sum())
-    total_miles = float(loads_df["miles"].fillna(0).sum())
-    deadhead = float(loads_df["deadhead_miles"].fillna(0).sum())
+    if "loaded_miles" in loads_df.columns:
+        loaded = float(loads_df["loaded_miles"].fillna(miles_col).fillna(0).sum())
+    else:
+        loaded = float(miles_col.sum())
+    total_miles = float(miles_col.sum()) if "miles" in loads_df.columns else loaded
+    if "deadhead_miles" in loads_df.columns:
+        deadhead = float(loads_df["deadhead_miles"].fillna(0).sum())
+    else:
+        deadhead = 0.0
     if deadhead <= 0 and total_miles > 0:
         deadhead = max(0.0, total_miles - loaded)
     loaded_share = (loaded / total_miles) if total_miles > 0 else 0.0
@@ -1033,19 +1042,22 @@ def navigate_to_tab(tab_name: str) -> None:
     st.rerun()
 
 
+def _persist_owner_role() -> None:
+    role = st.session_state.get("lawson_owner_role", DEFAULT_OWNER)
+    if role in DRIVERS:
+        set_active_owner(role)
+
+
 def render_lawson_sidebar_extras() -> None:
     """Owner role + Lawson lane context in sidebar."""
-    owner = st.selectbox(
+    active = get_active_owner()
+    st.selectbox(
         "Operating as",
         list(DRIVERS),
-        index=list(DRIVERS).index(get_active_owner())
-        if get_active_owner() in DRIVERS
-        else 0,
+        index=list(DRIVERS).index(active) if active in DRIVERS else 0,
         key="lawson_owner_role",
+        on_change=_persist_owner_role,
     )
-    if owner != get_active_owner():
-        set_active_owner(owner)
-        st.rerun()
 
 
 def render_sidebar() -> None:
@@ -1843,6 +1855,7 @@ def render_load_board_tab() -> None:
         NC_GA_MARKET_INTEL,
         fetch_opportunities,
         insert_opportunity,
+        upsert_market_intel,
     )
 
     render_target_lane_banner()
@@ -1882,22 +1895,29 @@ def render_load_board_tab() -> None:
     st.markdown("#### NC/GA End-Dump Market Intel")
     if st.button("Refresh BulkLoads Intel", use_container_width=True):
         st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
-        for item in NC_GA_MARKET_INTEL:
-            try:
-                with closing(get_connection()) as conn:
-                    insert_opportunity(
+        added, updated, errors = 0, 0, 0
+        with closing(get_connection()) as conn:
+            for item in NC_GA_MARKET_INTEL:
+                try:
+                    if upsert_market_intel(
                         conn,
                         lane=item["lane"],
                         commodity=item["commodity"],
                         rate=item["rate"],
                         contact=item["contact"],
                         notes=item.get("notes", ""),
-                        source="bulkloads_intel",
-                    )
-                    conn.commit()
-            except Exception:
-                pass
-        st.success(f"Refreshed {len(NC_GA_MARKET_INTEL)} listings into opportunities.")
+                    ):
+                        added += 1
+                    else:
+                        updated += 1
+                except Exception as exc:
+                    errors += 1
+                    log.warning("BulkLoads upsert failed: %s", exc)
+            conn.commit()
+        msg = f"Intel sync — {added} new, {updated} updated"
+        if errors:
+            msg += f", {errors} errors (see logs)"
+        st.success(msg)
         st.rerun()
 
     refreshed = st.session_state.get("load_board_refreshed", "Not refreshed this session")
@@ -1979,8 +1999,18 @@ def render_gps_tracking_tab() -> None:
     if live_sim:
         st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.03) % 1.0
 
-    fix = _cached_traccar_fix(device_id) if live_poll and conn_status["ok"] else None
+    fix = None
+    if conn_status["ok"]:
+        if live_poll:
+            fix = _cached_traccar_fix(device_id)
+        elif st.session_state.get("gps_force_poll"):
+            clear_traccar_cache()
+            fix = _cached_traccar_fix(device_id)
+            st.session_state.gps_force_poll = False
+
     using_sim = fix is None
+    if conn_status["ok"] and using_sim and not live_sim:
+        st.warning("Traccar connected but no position fix — enable poll or check device online.")
 
     if using_sim:
         lat, lon, location_label = interpolate_route(st.session_state.gps_sim_progress)
@@ -2076,6 +2106,7 @@ def render_gps_tracking_tab() -> None:
         )
         if st.button("Refresh GPS / clear cache", use_container_width=True):
             clear_traccar_cache()
+            st.session_state.gps_force_poll = True
             st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.1) % 1.0
             st.rerun()
 
