@@ -50,10 +50,12 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "lp_dispatch.db"
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
-APP_VERSION = "4.2 Lawson"
+APP_VERSION = "4.3 BIG E"
 
 try:
     from lp_helpers.lawson_profile import (
+        BIG_E_MODE,
+        BIG_E_TAGLINE,
         CARRIER_NAME,
         DEFAULT_OWNER,
         DRIVERS,
@@ -71,9 +73,11 @@ try:
         TRUCK_LABEL,
     )
 except ImportError:
+    BIG_E_MODE = True
+    BIG_E_TAGLINE = "BIG E Elite Refresh — Stable, Automated, Competitive"
     CARRIER_NAME = "L & P Dispatch"
-    PLATFORM_TITLE = "L & P Dispatch — Lawson Freight"
-    PAGE_TITLE = "L & P Dispatch | Lawson Freight"
+    PLATFORM_TITLE = "Lawson Freight Platform — BIG E Elite Refresh"
+    PAGE_TITLE = "Lawson Freight"
     TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
     MISSION_BLURB = (
         "Build loaded miles Spruce Pine NC → Central Georgia (Kohler area). "
@@ -99,15 +103,15 @@ except ImportError:
     ]
     LAWSON_SEED_LEADS = []
 
-TAB_OPTIONS = [
-    "Dashboard",
-    "Leads",
-    "Logger",
-    "GPS",
-    "BOL",
-    "Alerts",
-    "Rates",
+TAB_LABELS = [
+    "📊 Dashboard",
+    "👥 Leads",
+    "📝 Logger",
+    "🗺️ GPS",
+    "📄 BOL",
+    "📲 Alerts",
 ]
+TAB_KEYS = ["Dashboard", "Leads", "Logger", "GPS", "BOL", "Alerts"]
 
 FILTER_DEFAULTS: dict[str, str] = {
     "filter_leads_status": "All",
@@ -1051,8 +1055,13 @@ def match_lane_rates(
 
 
 def navigate_to_tab(tab_name: str) -> None:
-    st.session_state.active_tab = tab_name
-    st.session_state.main_navigation = tab_name
+    if tab_name == "Rates":
+        st.session_state.open_rates_expander = True
+        tab_name = "Dashboard"
+    if tab_name in TAB_KEYS:
+        st.session_state.active_tab = tab_name
+        label = TAB_LABELS[TAB_KEYS.index(tab_name)]
+        st.session_state.nav_hint = f"👉 **{label}** tab"
     st.rerun()
 
 
@@ -1091,7 +1100,10 @@ def render_sidebar() -> None:
             st.markdown(f"- {commodity}")
         st.divider()
         st.caption(f"Database: `{DB_PATH.name}`")
-        st.caption(f"{TAGLINE} · {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        if BIG_E_MODE:
+            st.caption(f"**BIG E MODE** · {TAGLINE}")
+        else:
+            st.caption(f"{TAGLINE} · {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
 
 def render_target_lane_banner() -> None:
@@ -1162,7 +1174,8 @@ def render_dashboard_tab() -> None:
     if action2.button("Log Potential Load", use_container_width=True):
         navigate_to_tab("Logger")
     if action3.button("Open Rate Calculator", use_container_width=True):
-        navigate_to_tab("Rates")
+        st.session_state.open_rates_expander = True
+        navigate_to_tab("Dashboard")
     if action4.button("Generate BOL", use_container_width=True):
         navigate_to_tab("BOL")
 
@@ -1278,6 +1291,10 @@ def render_dashboard_tab() -> None:
                     use_container_width=True,
                     hide_index=True,
                 )
+
+    rates_open = st.session_state.pop("open_rates_expander", False)
+    with st.expander("💰 Rate Calculator", expanded=rates_open):
+        render_rate_calculator_tab(embedded=True)
 
 
 def render_leads_crm_tab() -> None:
@@ -1697,8 +1714,9 @@ def render_load_logger_tab() -> None:
             st.dataframe(matches, use_container_width=True, hide_index=True)
 
 
-def render_rate_calculator_tab() -> None:
-    st.subheader("Rates")
+def render_rate_calculator_tab(*, embedded: bool = False) -> None:
+    if not embedded:
+        st.subheader("Rates")
     st.caption("Quick quoting for calls — Spruce Pine → Central GA lane")
 
     lane1, lane2 = st.columns(2)
@@ -2185,7 +2203,7 @@ def main() -> None:
 
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Dashboard"
-    if st.session_state.active_tab not in TAB_OPTIONS:
+    if st.session_state.active_tab not in TAB_KEYS:
         st.session_state.active_tab = "Dashboard"
 
     night_mode = False
@@ -2203,7 +2221,13 @@ def main() -> None:
             render_lawson_sidebar_extras()
             st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
             render_day_night_toggle()
-            st.caption(f"{APP_VERSION} · {get_active_owner()} · GPS · Alerts")
+            if BIG_E_MODE:
+                st.markdown(
+                    '<span style="background:#422006;color:#fdba74;padding:0.2rem 0.6rem;'
+                    'border-radius:12px;font-size:0.75rem;font-weight:700;">BIG E MODE</span>',
+                    unsafe_allow_html=True,
+                )
+            st.caption(f"{APP_VERSION} · {get_active_owner()} · GPS · Alerts · BOL")
         inject_road_css()
         if night_mode:
             inject_elite_dark_css()
@@ -2213,35 +2237,29 @@ def main() -> None:
     else:
         init_database()
 
-    st.title(PLATFORM_TITLE)
-    st.caption(f"{TAGLINE} · {TRAILER_DESC} · {APP_VERSION} · {DB_PATH.name}")
+    st.title(f"🚛 {PLATFORM_TITLE}")
+    st.caption(f"{TAGLINE} · {TRAILER_DESC} · {APP_VERSION} · `{DB_PATH.name}`")
 
-    selected_tab = st.radio(
-        "Navigation",
-        TAB_OPTIONS,
-        horizontal=True,
-        label_visibility="collapsed",
-        index=TAB_OPTIONS.index(st.session_state.active_tab),
-        key="main_navigation",
-    )
-    st.session_state.active_tab = selected_tab
+    nav_hint = st.session_state.pop("nav_hint", None)
+    if nav_hint:
+        st.info(nav_hint)
 
-    if selected_tab == "Dashboard":
+    tab_dashboard, tab_leads, tab_logger, tab_gps, tab_bol, tab_alerts = st.tabs(TAB_LABELS)
+
+    with tab_dashboard:
         render_dashboard_tab()
-    elif selected_tab == "Leads":
+    with tab_leads:
         render_leads_crm_tab()
-    elif selected_tab == "Logger":
+    with tab_logger:
         render_load_logger_tab()
-    elif selected_tab == "Rates":
-        render_rate_calculator_tab()
-    elif selected_tab == "BOL":
-        render_bol_generator_tab()
-    elif selected_tab == "GPS":
+    with tab_gps:
         render_gps_tracking_tab()
-    elif selected_tab == "Alerts":
+    with tab_bol:
+        render_bol_generator_tab()
+    with tab_alerts:
         render_alerts_tab()
 
-    st.caption(f"{CARRIER_NAME} — optimized for Phillip & Lawson · local-first · {DB_PATH.name}")
+    st.caption(BIG_E_TAGLINE)
 
 
 if __name__ == "__main__":

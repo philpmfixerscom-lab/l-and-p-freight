@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 CARRIER_NAME = "L & P Dispatch"
-PLATFORM_TITLE = "L & P Dispatch — Lawson Freight"
-PAGE_TITLE = "L & P Dispatch | Lawson Freight"
+BIG_E_MODE = True
+BIG_E_TAGLINE = "BIG E Elite Refresh — Stable, Automated, Competitive"
+PLATFORM_TITLE = "Lawson Freight Platform — BIG E Elite Refresh"
+PAGE_TITLE = "Lawson Freight"
 TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
 MISSION_BLURB = (
     "Build loaded miles from Spruce Pine, NC to Central Georgia (Kohler area). "
