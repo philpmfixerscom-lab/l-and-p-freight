@@ -1,0 +1,31 @@
+i have have loader built in and billing 
+
+catergorize each truck and trailer and route to get paid 
+
+how bill off this platform abd pay the trucker 
+ it tracks loaded miles and unloaded miles 
+
+a lot run of google miles and trucker route miles 
+if i can go in and set parameters -if you can go edit route 
+
+if they take route to Asheville to johnsoncity to Nashville 
+instead of taking 40 all the way it still pays them the same regardless of route as long as miles the same pay is the same 
+
+sp to Nashville google miles has it short 30 miles driver gets mad it shorted them 30 miles the program automatically pays them for the miles they drove 
+
+if we can set up a physical hardware system in their truck they get their bill information 
+
+have it so customer has realtime billing as soon as the driver accepts the load, they can track load, dispatch request orders/purchase orders - if they purchase 16 loads from a manufacturer they can request 16 loads to delivered and they can set the schedule - specifically request pick/delivery dates 
+
+
+
+3-4 production is so bad in states theyere closing 3-4 plants redhill, crytalplant, minpro and only leave schoolhouse - covia and sibelco 
+
+
+build brokerage and do it quietly - truckers 
+brokerage license 
+liability insurance 
+dot number
+emc number 
+llc 
+ein 
