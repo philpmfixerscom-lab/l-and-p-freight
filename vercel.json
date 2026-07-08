@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "name": "lp-freight-website",
+  "builds": [
+    { "src": "web/**", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/static/(.*)", "dest": "/web/static/$1" },
+    { "src": "/css/(.*)", "dest": "/web/css/$1" },
+    { "src": "/js/(.*)", "dest": "/web/js/$1" },
+    { "src": "/manifest.json", "dest": "/web/manifest.json" },
+    { "src": "/app/(.*)", "dest": "https://dispatch.lpfreight.com/app/$1" },
+    { "src": "/(.*)", "dest": "/web/$1" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}
