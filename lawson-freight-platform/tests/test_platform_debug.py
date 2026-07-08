@@ -181,6 +181,20 @@ def test_emergency_sms_blocklist():
     assert "lawson_phone" not in dial_ids
 
 
+def test_mobile_web_urls(monkeypatch):
+    from lp_helpers.mobile_web import app_start_url, driver_start_url
+
+    monkeypatch.delenv("LP_WEB_MODE", raising=False)
+    monkeypatch.setenv("LP_APP_URL", "http://127.0.0.1:8502")
+    assert app_start_url() == "http://127.0.0.1:8502/"
+    assert driver_start_url() == "http://127.0.0.1:8502/?view=driver"
+
+    monkeypatch.setenv("LP_WEB_MODE", "1")
+    monkeypatch.setenv("LP_APP_URL", "https://dispatch.lpfreight.com")
+    assert app_start_url() == "https://dispatch.lpfreight.com/app/"
+    assert driver_start_url() == "https://dispatch.lpfreight.com/app/?view=driver"
+
+
 def test_new_load_logged_sms_template():
     import app as platform
 

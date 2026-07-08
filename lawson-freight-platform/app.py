@@ -2563,6 +2563,19 @@ def main() -> None:
 
     load_persistent_filters()
 
+    try:
+        from lp_helpers.mobile_web import (
+            inject_mobile_css,
+            inject_mobile_shell_js,
+            inject_pwa_head,
+        )
+
+        inject_pwa_head()
+        inject_mobile_css()
+        inject_mobile_shell_js()
+    except ImportError:
+        pass
+
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Dashboard"
     if st.session_state.active_tab not in TAB_KEYS:

@@ -1,17 +1,21 @@
 $ErrorActionPreference = "Stop"
-Set-Location -LiteralPath $PSScriptRoot
 
-$venvPath = Join-Path $PSScriptRoot ".venv"
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$platformRoot = $PSScriptRoot
+$venvPath = Join-Path $repoRoot ".venv"
 $pythonExe = Join-Path $venvPath "Scripts\python.exe"
+$appPort = if ($env:APP_PORT) { $env:APP_PORT } else { "8502" }
 
 if (-not (Test-Path $pythonExe)) {
-    Write-Host "Run .\run.ps1 first to create the virtual environment." -ForegroundColor Yellow
+    Write-Host "Run ..\run.ps1 first to create the virtual environment." -ForegroundColor Yellow
     exit 1
 }
 
-$driverUrl = "http://127.0.0.1:8503?view=driver"
-Write-Host "Starting L and P Driver App at $driverUrl" -ForegroundColor Green
-& $pythonExe -m streamlit run (Join-Path $PSScriptRoot "app.py") `
+$driverUrl = "http://127.0.0.1:$appPort/?view=driver"
+Write-Host "Starting L & P Driver App at $driverUrl" -ForegroundColor Green
+Write-Host "Tip: run ..\run-fleet.ps1 to start website + dispatch together." -ForegroundColor Gray
+
+& $pythonExe -m streamlit run (Join-Path $platformRoot "app.py") `
     --server.address 127.0.0.1 `
-    --server.port 8503 `
+    --server.port $appPort `
     --server.headless false
