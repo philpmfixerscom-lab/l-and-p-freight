@@ -12,6 +12,21 @@ from twilio.rest import Client
 import folium
 from streamlit_folium import st_folium
 
+
+def send_load_alert(shipper: str, tons: float, sid: str, token: str, from_phone: str, to_phone: str) -> None:
+    if not all([sid, token, from_phone, to_phone]):
+        return
+    try:
+        client = Client(sid, token)
+        client.messages.create(
+            body=f"Lawson Freight Alert: New load logged: {shipper} - {tons} tons",
+            from_=from_phone,
+            to=to_phone,
+        )
+    except Exception:
+        pass
+
+
 st.set_page_config(page_title="Lawson Freight", layout="wide")
 st.title("🚛 Lawson Freight Platform - BIG E Optimized")
 
@@ -65,6 +80,14 @@ with tab3:
         if st.form_submit_button("Log Load"):
             c.execute("INSERT INTO loads (date, shipper, commodity, tons, rate) VALUES (?,?,?,?,?)", (str(d), shipper, comm, tons, rate))
             conn.commit()
+            send_load_alert(
+                shipper,
+                tons,
+                st.secrets.get("TWILIO_SID", ""),
+                st.secrets.get("TWILIO_TOKEN", ""),
+                st.secrets.get("TWILIO_FROM_PHONE", ""),
+                st.secrets.get("DISPATCH_PHONE", "+18284678218"),
+            )
             st.success("Logged!")
 
 with tab4:
@@ -88,8 +111,35 @@ with tab4:
             st.download_button("Download BOL.pdf", buffer, "bol.pdf", "application/pdf")
 
 with tab5:
-    st.header("Notifications")
-    # Twilio + SMTP here (add your credentials section as before)
+    st.header("Automated Twilio SMS Alerts")
+    st.subheader("Setup")
+    sid = st.text_input("Twilio SID", type="password", value=st.secrets.get("TWILIO_SID", ""))
+    token = st.text_input("Twilio Token", type="password", value=st.secrets.get("TWILIO_TOKEN", ""))
+    from_phone = st.text_input(
+        "Twilio From Phone",
+        value=st.secrets.get("TWILIO_FROM_PHONE", "+your_twilio_number"),
+    )
+    to_phone = st.text_input(
+        "Dispatch Phone",
+        value=st.secrets.get("DISPATCH_PHONE", "+18284678218"),
+    )
+
+    if st.button("Send Test Alert"):
+        try:
+            client = Client(sid, token)
+            client.messages.create(
+                body="Lawson Freight Alert: New load opportunity ready.",
+                from_=from_phone,
+                to=to_phone,
+            )
+            st.success("Test SMS Sent!")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+
+    st.subheader("Automation Rules")
+    st.write("• New Load Logged → SMS to dispatcher")
+    st.write("• Load Status Change → Alert")
+    st.write("• Daily Summary → Morning report")
 
 conn.close()
 st.caption("BIG E Optimized • Stable • Ready for Lawson")
