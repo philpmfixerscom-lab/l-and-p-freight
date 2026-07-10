@@ -45,14 +45,14 @@ Write-Host "Installing/updating dependencies..." -ForegroundColor Cyan
 & $pythonExe -m pip install --upgrade pip
 & $pythonExe -m pip install -r (Join-Path $PSScriptRoot "requirements.txt")
 
-# Kill stale instance on 8502 (duplicate listeners cause 404 in browser)
+# Kill stale instance on 8501 (duplicate listeners cause 404 in browser)
 $ErrorActionPreference = 'Continue'
-Get-NetTCPConnection -LocalPort 8502 -ErrorAction SilentlyContinue |
+Get-NetTCPConnection -LocalPort 8501 -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 1
 $ErrorActionPreference = 'Stop'
 
-$appUrl = "http://127.0.0.1:8502"
+$appUrl = "http://127.0.0.1:8501"
 Write-Host ('Starting L and P Freight Platform at ' + $appUrl) -ForegroundColor Green
 Write-Host ('Open ' + $appUrl + ' in your browser. If you see 404, wait 5 sec and refresh.') -ForegroundColor Yellow
-& $pythonExe -m streamlit run (Join-Path $PSScriptRoot 'app.py') --server.address 127.0.0.1 --server.port 8502 --server.headless false
+& $pythonExe -m streamlit run (Join-Path $PSScriptRoot 'app.py') --server.address 127.0.0.1 --server.port 8501 --server.headless false
