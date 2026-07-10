@@ -132,6 +132,64 @@ def last_route_for_load(load_id: int) -> dict[str, Any] | None:
     return df.iloc[0].to_dict()
 
 
+def ingest_eld_miles(
+    load_id: int,
+    actual_loaded: float,
+    actual_empty: float,
+    waypoints: str = "ELD breadcrumb trail",
+) -> dict[str, Any]:
+    """Ingest actual driven miles reported by the in-cab ELD/hardware.
+
+    Updates the latest route's actuals for the load so driver pay (which is
+    always computed on actual miles) reflects what the hardware recorded. If no
+    route exists yet, one is created from the reported actuals.
+    """
+    actual_loaded = max(0.0, float(actual_loaded or 0.0))
+    actual_empty = max(0.0, float(actual_empty or 0.0))
+    existing = last_route_for_load(load_id)
+    if existing is not None:
+        route_id = int(existing["id"])
+        update_route_actuals(route_id, actual_loaded, actual_empty)
+        created = False
+    else:
+        route_id = save_route(
+            load_id, waypoints, actual_loaded, actual_empty,
+            google_miles=None, source="eld",
+        )
+        update_route_actuals(route_id, actual_loaded, actual_empty)
+        created = True
+    return {
+        "route_id": route_id,
+        "load_id": load_id,
+        "actual_loaded_miles": actual_loaded,
+        "actual_empty_miles": actual_empty,
+        "actual_total_miles": round(actual_loaded + actual_empty, 1),
+        "route_created": created,
+        "source": "eld",
+    }
+
+
+def create_eld_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+    """Vendor-agnostic ELD webhook ingress (Samsara/Motive/Geotab).
+
+    Recognized events:
+      - 'miles_update' / 'trip_completed': data{actual_loaded, actual_empty}
+        -> ingested into the route actuals for the given load_id.
+    Unknown events are accepted and acknowledged without side effects.
+    """
+    event = str(payload.get("event", "")).lower()
+    load_id = payload.get("load_id")
+    data = payload.get("data", {}) or {}
+
+    if event in ("miles_update", "trip_completed", "location_update") and load_id is not None:
+        actual_loaded = data.get("actual_loaded_miles", data.get("actual_loaded"))
+        actual_empty = data.get("actual_empty_miles", data.get("actual_empty"))
+        if actual_loaded is not None or actual_empty is not None:
+            result = ingest_eld_miles(int(load_id), actual_loaded or 0.0, actual_empty or 0.0)
+            return {"status": "ingested", "event": event, **result}
+    return {"status": "accepted", "event": event, "load_id": load_id}
+
+
 def validate_route(
     waypoints: str,
     planned_loaded: float,

@@ -6,6 +6,56 @@
 
 ---
 
+## Consolidation Update — 2026-07-10
+
+Single-app consolidation completed. `app.py` is now the one canonical entrypoint
+(`run.ps1`), running on the single schema owned by `lp_helpers/database.py`.
+
+- **Single schema source of truth:** `app.py` now calls `database.init_db()` at
+  startup instead of its own partial `init_billing_schema()`. It no longer crashes
+  on a fresh `lp_dispatch.db` (previously `leads`/`loads` were never created).
+- **Schema reconciliation:** `app.py` now uses the canonical columns
+  (`leads.company`, `loads.pickup_date`, `loads.deadhead_miles`). The Dashboard and
+  Leads tabs previously referenced non-existent columns (`leads.name`,
+  `next_followup_date`, `followup_type`) — those follow-up fields are now real
+  columns on `leads` (added in `database.py` schema + idempotent migration).
+- **PDF BOL restored:** the BOL tab now emits a proper PDF (was plain `.txt`).
+- **Retired duplicates:** deleted the standalone `lawson-freight-platform/` build,
+  `run_lawson.ps1`, and the duplicate nested `L&P_Freight/` notes folder.
+- **Verified:** cold-start smoke test (Streamlit `AppTest`, all tabs, fresh DB) +
+  full `pytest` suite (22 passing).
+- **Still open:** `lp_helpers/pages.py` (the richer README-documented v3.0 UI:
+  Demo Data / AI Intelligence / Reports) remains in the tree but is **not wired**
+  to an entrypoint — candidate for a future merge into `app.py`.
+
+---
+
+## Feature Additions — 2026-07-10 (Lawson's asks)
+
+Implemented on top of the consolidated single app. Test count: **41 passing**.
+
+- **Pay for actual miles driven** (`lp_helpers/pay_engine.py`, tested): drivers are
+  ALWAYS paid for the miles they actually drove. If Google shorts the lane 30 mi or
+  the driver runs an alternate route, pay follows the real miles. Google/planned is
+  reference only; deviations beyond ±10% are *flagged for review* but never reduce
+  pay. The settlement tab now shows an explicit dollar-impact decision.
+- **Customer real-time billing on load acceptance**: `loads.accepted_at` added
+  (schema + migration). A new "Driver Load Acceptance & Status" control flips a load
+  to Accepted/In Transit/Delivered; the moment a driver accepts, the Customer Portal
+  shows "BILLING LIVE", a live-billing KPI, and a downloadable live invoice.
+- **PO multi-load scheduling/tracking**: already present; now synced to load status.
+- **ELD / hardware ingest** (`routing_editor.ingest_eld_miles`, `create_eld_webhook`,
+  tested): in-cab hardware miles flow into route actuals → driver pay. Includes a
+  vendor-agnostic webhook ingress and a "Push actuals from ELD device" button.
+- **Truck/trailer/route categorization**: covered by existing asset profiles
+  (Truck+Trailer / Truck / Trailer, per-mile loaded/empty rates) + route/settlement.
+- **Brokerage build tracker**: `BROKERAGE_CHECKLIST.md` (LLC/EIN/USDOT/MC/insurance/
+  BMC-84 bond + market intel from Lawson's notes).
+
+**New tests:** `tests/test_pay_engine.py` (13), `tests/test_eld_ingest.py` (6).
+
+---
+
 ## Overall Architecture
 
 ```

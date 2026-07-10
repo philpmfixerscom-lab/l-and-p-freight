@@ -169,6 +169,9 @@ CREATE TABLE IF NOT EXISTS leads (
     status TEXT DEFAULT 'Active',
     priority INTEGER DEFAULT 5,
     last_contact TEXT,
+    next_followup_date TEXT,
+    followup_type TEXT,
+    notes TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -188,6 +191,7 @@ CREATE TABLE IF NOT EXISTS loads (
     rate_per_ton REAL,
     total_revenue REAL,
     status TEXT DEFAULT 'Logged',
+    accepted_at TEXT,
     notes TEXT,
     voice_audio_path TEXT,
     lead_id INTEGER,
@@ -1016,6 +1020,13 @@ def init_db() -> None:
         load_cols = {row[1] for row in conn.execute("PRAGMA table_info(loads)").fetchall()}
         if "voice_audio_path" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN voice_audio_path TEXT")
+        if "accepted_at" not in load_cols:
+            conn.execute("ALTER TABLE loads ADD COLUMN accepted_at TEXT")
+
+        lead_cols = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
+        for col in ("next_followup_date", "followup_type", "notes"):
+            if col not in lead_cols:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col} TEXT")
 
         if conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0] == 0:
             for lead in SEED_LEADS:

@@ -4,6 +4,10 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 from fpdf import FPDF
 
+from lp_helpers.database import DB_PATH, init_db, seed_assets
+from lp_helpers.pay_engine import pay_decision
+from routing_editor import ingest_eld_miles
+
 st.set_page_config(page_title="L & P Freight", layout="wide", page_icon="🚛")
 
 # Custom CSS for top-tier contrast and polish
@@ -51,127 +55,9 @@ st.markdown("""
 
 
 def get_conn():
-    conn = sqlite3.connect("lp_dispatch.db", check_same_thread=False)
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
-
-def init_billing_schema():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS assets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            asset_type TEXT NOT NULL,
-            name TEXT NOT NULL,
-            description TEXT,
-            loaded_rate_per_mile REAL NOT NULL DEFAULT 0.0,
-            empty_rate_per_mile REAL NOT NULL DEFAULT 0.0,
-            status TEXT DEFAULT 'Active',
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS settlements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            load_id INTEGER NOT NULL,
-            asset_id INTEGER,
-            driver_name TEXT,
-            planned_loaded_miles REAL NOT NULL,
-            actual_loaded_miles REAL NOT NULL,
-            planned_empty_miles REAL NOT NULL,
-            actual_empty_miles REAL NOT NULL,
-            loaded_rate REAL NOT NULL,
-            empty_rate REAL NOT NULL,
-            bonuses REAL DEFAULT 0.0,
-            deductions REAL DEFAULT 0.0,
-            accessorials REAL DEFAULT 0.0,
-            total_pay REAL NOT NULL,
-            variance_pct REAL,
-            status TEXT DEFAULT 'Draft',
-            notes TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (load_id) REFERENCES loads(id),
-            FOREIGN KEY (asset_id) REFERENCES assets(id)
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS routes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            load_id INTEGER NOT NULL,
-            waypoints TEXT NOT NULL,
-            planned_loaded_miles REAL NOT NULL,
-            planned_empty_miles REAL NOT NULL,
-            google_miles REAL,
-            actual_loaded_miles REAL,
-            actual_empty_miles REAL,
-            source TEXT DEFAULT 'planned',
-            notes TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (load_id) REFERENCES loads(id)
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            contact_name TEXT,
-            phone TEXT,
-            email TEXT,
-            api_key TEXT UNIQUE,
-            notes TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS purchase_orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer_id INTEGER NOT NULL,
-            po_number TEXT UNIQUE NOT NULL,
-            status TEXT DEFAULT 'Open',
-            total_estimated_revenue REAL DEFAULT 0.0,
-            notes TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (customer_id) REFERENCES customers(id)
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS po_loads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            po_id INTEGER NOT NULL,
-            load_id INTEGER,
-            sequence INTEGER DEFAULT 1,
-            scheduled_pickup_date TEXT,
-            scheduled_delivery_date TEXT,
-            status TEXT DEFAULT 'Scheduled',
-            notes TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (po_id) REFERENCES purchase_orders(id),
-            FOREIGN KEY (load_id) REFERENCES loads(id)
-        )
-    """)
-    cols = [row[1] for row in c.execute("PRAGMA table_info(loads)").fetchall()]
-    if 'asset_id' not in cols:
-        c.execute("ALTER TABLE loads ADD COLUMN asset_id INTEGER")
-    if 'route_id' not in cols:
-        c.execute("ALTER TABLE loads ADD COLUMN route_id INTEGER")
-    conn.commit()
-    conn.close()
-
-def seed_assets():
-    conn = get_conn()
-    c = conn.cursor()
-    existing = c.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
-    if existing == 0:
-        assets = [
-            ("Truck+Trailer", "Tractor + 39ft End-Dump", "Primary unit", 1.75, 0.85),
-            ("Truck+Trailer", "Backup Tractor + Trailer", "Secondary unit", 1.65, 0.80),
-            ("Trailer", "39ft End-Dump Only", "Trailer only", 1.50, 0.75),
-        ]
-        for a in assets:
-            c.execute("INSERT INTO assets (asset_type, name, description, loaded_rate_per_mile, empty_rate_per_mile) VALUES (?,?,?,?,?)", a)
-        conn.commit()
-    conn.close()
 
 
 from portal import (
@@ -332,7 +218,7 @@ def invoice_preview_pdf(load):
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(0, 6, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
     pdf.ln(4)
-    total_miles = (load.get('loaded_miles', 0) or 0) + (load.get('empty_miles', 0) or 0)
+    total_miles = (load.get('loaded_miles', 0) or 0) + (load.get('deadhead_miles', 0) or 0)
     rows = [
         ("To", str(load.get('shipper', '-'))),
         ("BOL #", str(load.get('bol_number', '-'))),
@@ -351,10 +237,46 @@ def invoice_preview_pdf(load):
     return raw if isinstance(raw, (bytes, bytearray)) else bytes(raw)
 
 
+def bol_pdf(bol_number, shipper, commodity, weight_tons, rate_per_ton, origin="Spruce Pine, NC", destination="Central Georgia (Kohler area)", pickup_date=None, notes=""):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "L & P Freight - Bill of Lading", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, "Spruce Pine NC - 39ft frameless lined end-dump", ln=True)
+    pdf.ln(4)
+    rows = [
+        ("BOL #", str(bol_number)),
+        ("Date", str(pickup_date or date.today())),
+        ("Shipper", str(shipper or "-")),
+        ("Commodity", str(commodity or "-")),
+        ("Origin", str(origin)),
+        ("Destination", str(destination)),
+        ("Weight (tons)", f"{weight_tons:.1f}"),
+        ("Rate/Ton", f"${rate_per_ton:.2f}"),
+        ("Total Revenue", f"${weight_tons * rate_per_ton:,.2f}"),
+    ]
+    for label, value in rows:
+        pdf.cell(45, 7, label, border=1)
+        pdf.cell(0, 7, value, border=1, ln=True)
+    if notes:
+        pdf.ln(4)
+        pdf.multi_cell(0, 6, f"Notes: {notes}")
+    pdf.ln(8)
+    pdf.cell(0, 7, "Shipper Signature: _________________________  Date: __________", ln=True)
+    pdf.ln(6)
+    pdf.cell(0, 7, "Driver Signature: __________________________  Date: __________", ln=True)
+    pdf.ln(6)
+    pdf.cell(0, 7, "Receiver Signature: ________________________  Date: __________", ln=True)
+    raw = pdf.output()
+    return raw if isinstance(raw, (bytes, bytearray)) else bytes(raw)
+
+
 st.title("🚛 L & P Freight — Mobile Command Center")
 st.caption("Spruce Pine NC → Central Georgia (Kohler area)  |  v3.2 — Billing & Driver Pay")
 
-init_billing_schema()
+init_db()
 seed_assets()
 init_customer_portal()
 seed_demo_customers()
@@ -407,8 +329,8 @@ with tab1:
     
     # Deadhead Summary
     if not loads_df.empty:
-        total_loaded = loads_df['loaded_miles'].sum()
-        total_empty = loads_df['empty_miles'].sum()
+        total_loaded = loads_df['loaded_miles'].fillna(0).sum()
+        total_empty = loads_df['deadhead_miles'].fillna(0).sum()
         deadhead_pct = round((total_empty / (total_loaded + total_empty) * 100), 1) if (total_loaded + total_empty) > 0 else 0
         
         st.info(f"**Deadhead Tracking:** {total_empty:,.0f} empty miles logged  •  {deadhead_pct}% of total miles")
@@ -424,14 +346,14 @@ with tab1:
     
     if not due_leads.empty:
         st.warning(f"**{len(due_leads)} leads require follow-up**")
-        st.dataframe(due_leads[['name', 'phone', 'status', 'next_followup_date', 'followup_type']], use_container_width=True, hide_index=True)
+        st.dataframe(due_leads[['company', 'phone', 'status', 'next_followup_date', 'followup_type']], use_container_width=True, hide_index=True)
     else:
         st.success("No follow-ups due today. Excellent discipline.")
     
     # Recent Activity
     if not loads_df.empty:
         st.subheader("Recent Loads")
-        st.dataframe(loads_df[['load_date', 'commodity', 'weight_tons', 'loaded_miles', 'empty_miles', 'total_revenue']].tail(5), use_container_width=True)
+        st.dataframe(loads_df[['pickup_date', 'commodity', 'weight_tons', 'loaded_miles', 'deadhead_miles', 'total_revenue']].tail(5), use_container_width=True)
 
 # ========== LEADS & FOLLOW-UPS ==========
 with tab2:
@@ -441,16 +363,17 @@ with tab2:
     leads_df = pd.read_sql("SELECT * FROM leads", conn)
     conn.close()
     
-    st.dataframe(leads_df[['name', 'phone', 'status', 'last_contact', 'next_followup_date', 'followup_type']], use_container_width=True, hide_index=True)
+    st.dataframe(leads_df[['company', 'phone', 'status', 'last_contact', 'next_followup_date', 'followup_type']], use_container_width=True, hide_index=True)
     
     st.divider()
     st.subheader("Update Lead & Set Next Follow-up")
     
-    selected = st.selectbox("Select Lead", leads_df['name'].tolist())
-    row = leads_df[leads_df['name'] == selected].iloc[0]
+    selected = st.selectbox("Select Lead", leads_df['company'].tolist())
+    row = leads_df[leads_df['company'] == selected].iloc[0]
     
-    new_status = st.selectbox("Status", ["New", "Contacted", "Quote Sent", "Booked", "On Hold", "Not Interested"], 
-                              index=["New","Contacted","Quote Sent","Booked","On Hold","Not Interested"].index(row['status']))
+    status_options = ["New", "Contacted", "Quote Sent", "Booked", "On Hold", "Not Interested", "Hot", "Active", "Negotiating", "Closed"]
+    current_status = row['status'] if row['status'] in status_options else status_options[0]
+    new_status = st.selectbox("Status", status_options, index=status_options.index(current_status))
     
     new_note = st.text_area("Call / Note Summary")
     
@@ -464,7 +387,8 @@ with tab2:
         conn = get_conn()
         c = conn.cursor()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        combined = f"[{ts}] {new_note}\n{row['notes']}" if new_note else row['notes']
+        prior_notes = row['notes'] if pd.notna(row['notes']) else ""
+        combined = f"[{ts}] {new_note}\n{prior_notes}" if new_note else prior_notes
         c.execute("""UPDATE leads SET status=?, notes=?, last_contact=?, next_followup_date=?, followup_type=? WHERE id=?""",
                   (new_status, combined, ts, str(next_date), f_type, int(row['id'])))
         conn.commit()
@@ -477,10 +401,10 @@ with tab3:
     st.subheader("Log Load + Track Empty Return Miles")
     
     conn = get_conn()
-    leads = pd.read_sql("SELECT id, name FROM leads", conn)
+    leads = pd.read_sql("SELECT id, company FROM leads", conn)
     conn.close()
     
-    lead_map = {r['name']: r['id'] for _, r in leads.iterrows()}
+    lead_map = {r['company']: r['id'] for _, r in leads.iterrows()}
     sel_lead = st.selectbox("Shipper", list(lead_map.keys()))
     lead_id = lead_map[sel_lead]
     
@@ -525,13 +449,61 @@ with tab3:
         conn = get_conn()
         c = conn.cursor()
         bol = f"LP-{datetime.now().strftime('%Y%m%d%H%M')}"
-        c.execute("""INSERT INTO loads (lead_id, load_date, commodity, weight_tons, rate_per_ton, total_revenue, loaded_miles, empty_miles, bol_number, notes, asset_id)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                  (lead_id, str(l_date), comm, wgt, rate, round(wgt*rate,2), loaded_mi, empty_mi, bol, notes, asset_id))
+        c.execute("""INSERT INTO loads (lead_id, shipper, pickup_date, commodity, weight_tons, rate_per_ton, total_revenue, loaded_miles, deadhead_miles, miles, origin, destination, bol_number, notes, status, asset_id)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (lead_id, sel_lead, str(l_date), comm, wgt, rate, round(wgt*rate,2), loaded_mi, empty_mi, loaded_mi + empty_mi, "Spruce Pine, NC", "Central Georgia (Kohler area)", bol, notes, "Logged", asset_id))
         conn.commit()
         conn.close()
         st.success(f"Load logged. BOL: {bol}")
         st.rerun()
+
+    st.divider()
+    st.markdown("#### Driver Load Acceptance & Status")
+    st.caption("When the driver accepts a load, the customer sees live billing instantly.")
+    conn = get_conn()
+    accept_loads = pd.read_sql(
+        "SELECT id, bol_number, shipper, commodity, total_revenue, status, accepted_at FROM loads ORDER BY id DESC",
+        conn,
+    )
+    conn.close()
+    if accept_loads.empty:
+        st.caption("No loads yet — log one above.")
+    else:
+        LOAD_FLOW = ["Logged", "Accepted", "In Transit", "Delivered", "Invoiced", "Paid"]
+        acc_map = {f"{r['bol_number']} — {r['shipper']} ({r['status']})": r.to_dict() for _, r in accept_loads.iterrows()}
+        acc_sel = st.selectbox("Load", list(acc_map.keys()), key="accept_load_sel")
+        acc_load = acc_map[acc_sel]
+        cur_status = acc_load.get("status") or "Logged"
+        cA, cB = st.columns([2, 1])
+        with cA:
+            new_load_status = st.selectbox(
+                "Status",
+                LOAD_FLOW,
+                index=LOAD_FLOW.index(cur_status) if cur_status in LOAD_FLOW else 0,
+                key="accept_load_status",
+            )
+        with cB:
+            st.metric("Live Revenue", f"${float(acc_load.get('total_revenue') or 0):,.0f}")
+        if acc_load.get("accepted_at"):
+            st.success(f"Accepted {acc_load['accepted_at']} — billing is live for the customer.")
+        if st.button("Update Load Status", key="accept_load_btn", use_container_width=True):
+            conn = get_conn()
+            if new_load_status in ("Accepted", "In Transit", "Delivered", "Invoiced", "Paid") and not acc_load.get("accepted_at"):
+                conn.execute(
+                    "UPDATE loads SET status=?, accepted_at=datetime('now') WHERE id=?",
+                    (new_load_status, int(acc_load["id"])),
+                )
+            else:
+                conn.execute("UPDATE loads SET status=? WHERE id=?", (new_load_status, int(acc_load["id"])))
+            # keep any linked PO load rows in sync
+            conn.execute(
+                "UPDATE po_loads SET status=? WHERE load_id=?",
+                (new_load_status if new_load_status in ("Scheduled", "In Transit", "Delivered", "Cancelled") else "In Transit", int(acc_load["id"])),
+            )
+            conn.commit()
+            conn.close()
+            st.success(f"{acc_load['bol_number']} → {new_load_status}. Customer billing updated in real time.")
+            st.rerun()
 
 # ========== RATE CALCULATOR ==========
 with tab4:
@@ -593,7 +565,7 @@ with tab5:
     st.divider()
     
     st.markdown("#### Route Editor")
-    loads_df = pd.read_sql("SELECT id, bol_number, shipper, commodity, loaded_miles, empty_miles, pickup_date FROM loads ORDER BY pickup_date DESC", conn)
+    loads_df = pd.read_sql("SELECT id, bol_number, shipper, commodity, loaded_miles, deadhead_miles, pickup_date FROM loads ORDER BY pickup_date DESC", conn)
     if loads_df.empty:
         st.warning("Need loads to setup routes.")
     else:
@@ -602,7 +574,7 @@ with tab5:
         r_load_id = route_load_map[sel_route_load]
         rload_row = loads_df[loads_df['id'] == r_load_id].iloc[0]
         rt_planned_loaded = float(rload_row.get('loaded_miles') or 0)
-        rt_planned_empty = float(rload_row.get('empty_miles') or 0)
+        rt_planned_empty = float(rload_row.get('deadhead_miles') or 0)
         
         rt_existing = fetch_routes(load_id=r_load_id)
         rt_default_waypoints = f"Spruce Pine, NC → {rload_row.get('shipper','')} → {rload_row.get('destination','Kohler area, GA')}"
@@ -637,6 +609,17 @@ with tab5:
                     update_route_actuals(rid, u_actual_loaded, u_actual_empty)
                     st.success("Actual miles updated.")
                     st.rerun()
+
+        st.markdown("##### 📡 ELD / In-Cab Hardware")
+        st.caption("Pull the miles the truck actually drove straight from the ELD device. Pay follows actual miles.")
+        e1, e2 = st.columns(2)
+        eld_loaded = e1.number_input("ELD loaded miles", 0.0, 2000.0, float(rt_planned_loaded), 1.0, key="eld_loaded")
+        eld_empty = e2.number_input("ELD empty miles", 0.0, 2000.0, float(rt_planned_empty), 1.0, key="eld_empty")
+        if st.button("Push actuals from ELD device", key="eld_push", use_container_width=True):
+            res = ingest_eld_miles(r_load_id, eld_loaded, eld_empty)
+            verb = "created new route from" if res["route_created"] else "updated route with"
+            st.success(f"ELD {verb} {res['actual_total_miles']:.0f} actual miles. Driver pay will use these miles.")
+            st.rerun()
     
     st.divider()
     
@@ -667,7 +650,7 @@ with tab5:
     st.divider()
     
     st.markdown("#### Create Settlement")
-    loads_df = pd.read_sql("SELECT id, bol_number, shipper, commodity, loaded_miles, empty_miles, pickup_date, route_id FROM loads ORDER BY pickup_date DESC", conn)
+    loads_df = pd.read_sql("SELECT id, bol_number, shipper, commodity, loaded_miles, deadhead_miles, pickup_date, route_id FROM loads ORDER BY pickup_date DESC", conn)
     asset_options = fetch_assets()
     if loads_df.empty or asset_options.empty:
         st.warning("Need loads and assets to create a settlement.")
@@ -709,7 +692,7 @@ with tab5:
         default_empty_rate = float(arow['empty_rate_per_mile'])
         
         planned_loaded = float(load_row['loaded_miles'] or 0)
-        planned_empty = float(load_row['empty_miles'] or 0)
+        planned_empty = float(load_row['deadhead_miles'] or 0)
         
         st.caption(f"Planned from load: {planned_loaded:.0f} loaded · {planned_empty:.0f} empty · {planned_loaded + planned_empty:.0f} total")
         
@@ -735,27 +718,30 @@ with tab5:
         accessorials = st.number_input("Accessorials", 0.0, 5000.0, 0.0, 10.0)
         deductions = st.number_input("Deductions", 0.0, 5000.0, 0.0, 10.0)
         
-        # compute variance using route analysis if route exists
-        actual_total = actual_loaded + actual_empty
-        planned_total = planned_loaded + planned_empty
+        # L&P policy: driver is ALWAYS paid for actual miles driven.
+        # Google/planned is reference only; large deviation is flagged for review.
         rt_google_miles = None
         if not routes_df.empty:
             rt_google_miles = float(routes_df.iloc[0]['google_miles']) if routes_df.iloc[0].get('google_miles') else None
-        var = variance_pct(planned_total, actual_total)
-        if rt_google_miles:
-            gvar = variance_pct(rt_google_miles, actual_total)
-            if abs(gvar) > abs(var):
-                var = gvar
-        flag = abs(var) > 10.0
-        base_pay = (actual_loaded * loaded_rate_in) + (actual_empty * empty_rate_in)
-        total_pay = round(base_pay + bonuses + accessorials - deductions, 2)
+        decision = pay_decision(
+            actual_loaded, actual_empty, loaded_rate_in, empty_rate_in,
+            google_miles=rt_google_miles,
+            planned_loaded_miles=planned_loaded, planned_empty_miles=planned_empty,
+            bonuses=bonuses, accessorials=accessorials, deductions=deductions,
+            tolerance_pct=10.0,
+        )
+        var = decision["variance_pct"]
+        flag = decision["flagged"]
+        base_pay = decision["pay"]["base_pay"]
+        total_pay = decision["total_pay"]
         
-        st.markdown(f"**Base pay:** ${base_pay:.2f}  |  **Bonuses:** ${bonuses:.2f}  |  **Accessorials:** ${accessorials:.2f}  |  **Deductions:** ${deductions:.2f}")
+        st.markdown(f"**Base pay (actual miles):** ${base_pay:,.2f}  |  **Bonuses:** ${bonuses:.2f}  |  **Accessorials:** ${accessorials:.2f}  |  **Deductions:** ${deductions:.2f}")
+        st.info(f"💡 **Pay decision:** {decision['message']}")
         if flag:
-            st.error(f"⚠️ Route variance: {var:.1f}% — flagged for review (threshold ±10%)")
+            st.error(f"⚠️ Route variance: {var:+.1f}% — flagged for dispatcher review (threshold ±10%). Pay is unchanged — driver is paid for miles driven.")
         else:
-            st.success(f"Route variance: {var:.1f}% — within tolerance")
-        st.metric("Total Driver Pay", f"${total_pay:.2f}")
+            st.success(f"Route variance: {var:+.1f}% — within tolerance.")
+        st.metric("Total Driver Pay", f"${total_pay:,.2f}", help="Always calculated on actual miles driven.")
         
         if st.button("Save Settlement", type="primary", use_container_width=True):
             conn.execute(
@@ -822,25 +808,54 @@ with tab5:
 # ========== BOL ==========
 with tab6:
     st.subheader("Generate BOL")
-    ship = st.text_input("Shipper")
-    com = st.text_input("Commodity")
-    wt = st.number_input("Weight (tons)", value=22.0)
-    rt = st.number_input("Rate per Ton", value=55.0)
-    
-    if st.button("Generate BOL"):
-        bol_text = f"""L & P FREIGHT — BILL OF LADING
-Date: {datetime.now().strftime('%Y-%m-%d')}
-BOL #: LP-{datetime.now().strftime('%Y%m%d%H%M')}
-SHIPPER: {ship}
-COMMODITY: {com}
-WEIGHT: {wt} tons
-RATE: ${rt:.2f}/ton
-TOTAL: ${wt*rt:,.2f}
-ORIGIN: Spruce Pine, NC
-DESTINATION: Central Georgia (Kohler)
-TRAILER: 39 ft Frameless End-Dump"""
-        st.code(bol_text)
-        st.download_button("Download BOL", bol_text, file_name="BOL.txt")
+    st.caption("Create a printable PDF Bill of Lading. Pick a logged load or enter details manually.")
+
+    conn = get_conn()
+    bol_loads = pd.read_sql(
+        "SELECT id, bol_number, shipper, commodity, weight_tons, rate_per_ton, origin, destination, pickup_date, notes FROM loads ORDER BY pickup_date DESC, id DESC",
+        conn,
+    )
+    conn.close()
+
+    load_choice = "— Manual entry —"
+    if not bol_loads.empty:
+        bol_load_map = {f"{r['bol_number']} — {r['shipper']} ({r['commodity']})": r.to_dict() for _, r in bol_loads.iterrows()}
+        load_choice = st.selectbox("Source", ["— Manual entry —"] + list(bol_load_map.keys()))
+
+    if load_choice != "— Manual entry —":
+        src = bol_load_map[load_choice]
+        bol_no = str(src.get("bol_number") or f"LP-{datetime.now().strftime('%Y%m%d%H%M')}")
+        ship = st.text_input("Shipper", value=str(src.get("shipper") or ""))
+        com = st.text_input("Commodity", value=str(src.get("commodity") or ""))
+        wt = st.number_input("Weight (tons)", value=float(src.get("weight_tons") or 22.0))
+        rt = st.number_input("Rate per Ton", value=float(src.get("rate_per_ton") or 55.0))
+        origin = str(src.get("origin") or "Spruce Pine, NC")
+        destination = str(src.get("destination") or "Central Georgia (Kohler area)")
+        pickup = src.get("pickup_date")
+        bol_notes = str(src.get("notes") or "")
+    else:
+        bol_no = f"LP-{datetime.now().strftime('%Y%m%d%H%M')}"
+        ship = st.text_input("Shipper")
+        com = st.text_input("Commodity")
+        wt = st.number_input("Weight (tons)", value=22.0)
+        rt = st.number_input("Rate per Ton", value=55.0)
+        origin = "Spruce Pine, NC"
+        destination = "Central Georgia (Kohler area)"
+        pickup = None
+        bol_notes = ""
+
+    st.metric("Total Revenue", f"${wt * rt:,.2f}")
+
+    if st.button("Generate PDF BOL", type="primary"):
+        pdf_bytes = bol_pdf(bol_no, ship, com, wt, rt, origin, destination, pickup, bol_notes)
+        st.download_button(
+            "Download BOL (PDF)",
+            pdf_bytes,
+            file_name=f"BOL_{str(bol_no).replace('/', '-')}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+        st.success(f"BOL {bol_no} generated.")
 
 # ========== CUSTOMER PORTAL ==========
 with tab7:
@@ -861,10 +876,25 @@ with tab7:
         st.markdown(f"**Contact:** {cust_row.get('contact_name', '—')}  ·  **Phone:** {cust_row.get('phone', '—')}  ·  **Email:** {cust_row.get('email', '—')}")
         
         summary = get_customer_po_summary(cust_id)
-        c1, c2, c3 = st.columns(3)
+        conn = get_conn()
+        live_billing = pd.read_sql(
+            """
+            SELECT COALESCE(SUM(l.total_revenue), 0) AS billed, COUNT(*) AS n
+            FROM po_loads pl
+            JOIN purchase_orders po ON pl.po_id = po.id
+            JOIN loads l ON pl.load_id = l.id
+            WHERE po.customer_id = ? AND l.accepted_at IS NOT NULL
+            """,
+            conn, params=(cust_id,),
+        )
+        conn.close()
+        billed_amt = float(live_billing.iloc[0]['billed'] or 0)
+        billed_n = int(live_billing.iloc[0]['n'] or 0)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Open POs", summary['open_pos'])
         c2.metric("Scheduled Loads", summary['scheduled_loads'])
         c3.metric("Est. Revenue", f"${summary['total_est_revenue']:,.0f}")
+        c4.metric("Live Billing", f"${billed_amt:,.0f}", help=f"{billed_n} accepted load(s) billing in real time")
     
     st.divider()
     
@@ -883,7 +913,7 @@ with tab7:
                 conn = get_conn()
                 placeholders = ",".join("?" * len(po_ids))
                 poloads = pd.read_sql(f"""
-                    SELECT pl.*, l.bol_number, l.shipper, l.commodity, l.origin, l.destination, l.loaded_miles, l.empty_miles, l.total_revenue, l.status as load_status
+                    SELECT pl.*, l.id as real_load_id, l.bol_number, l.shipper, l.commodity, l.origin, l.destination, l.loaded_miles, l.deadhead_miles, l.weight_tons, l.rate_per_ton, l.total_revenue, l.status as load_status, l.accepted_at, l.pickup_date
                     FROM po_loads pl
                     LEFT JOIN loads l ON pl.load_id = l.id
                     WHERE pl.po_id IN ({placeholders})
@@ -895,16 +925,43 @@ with tab7:
                     st.info("No loads linked to your POs yet.")
                 else:
                     for _, plrow in poloads.iterrows():
-                        status_color = {"Scheduled": "blue", "In Transit": "orange", "Delivered": "green", "Cancelled": "red"}.get(plrow.get('status', 'Scheduled'), "gray")
+                        live_status = plrow.get('load_status') or plrow.get('status') or 'Scheduled'
+                        status_color = {"Scheduled": "blue", "Logged": "gray", "Accepted": "teal", "In Transit": "orange", "Delivered": "green", "Invoiced": "purple", "Paid": "green", "Cancelled": "red"}.get(live_status, "gray")
+                        is_billing = pd.notna(plrow.get('accepted_at')) and bool(plrow.get('accepted_at'))
+                        revenue = plrow.get('total_revenue', 0) if pd.notna(plrow.get('total_revenue', 0)) else 0
+                        billing_line = (
+                            f"<span style='color:#059669;font-weight:700;'>● BILLING LIVE</span> since {plrow.get('accepted_at')}"
+                            if is_billing else
+                            "<span style='color:#94a3b8;'>Billing starts when driver accepts</span>"
+                        )
                         st.markdown(
                             f"<div style='padding:0.75rem;border-left:4px solid {status_color};background:#f8fafc;margin-bottom:0.5rem;border-radius:6px;'>"
                             f"<b>Seq {plrow.get('sequence', '—')}</b> · {plrow.get('bol_number', 'Unlinked')} · {plrow.get('commodity', '—')}<br>"
-                            f"Status: <b>{plrow.get('status', 'Scheduled')}</b> · "
-                            f"Revenue: ${plrow.get('total_revenue', 0) if pd.notna(plrow.get('total_revenue', 0)) else 0:,.0f}<br>"
-                            f"{plrow.get('origin', '')} → {plrow.get('destination', '')}"
+                            f"Status: <b>{live_status}</b> · "
+                            f"Revenue: ${revenue:,.0f}<br>"
+                            f"{plrow.get('origin', '')} → {plrow.get('destination', '')}<br>"
+                            f"{billing_line}"
                             f"</div>",
                             unsafe_allow_html=True
                         )
+                        if is_billing and pd.notna(plrow.get('real_load_id')):
+                            inv_load = {
+                                'shipper': plrow.get('shipper'),
+                                'bol_number': plrow.get('bol_number'),
+                                'commodity': plrow.get('commodity'),
+                                'weight_tons': plrow.get('weight_tons') or 0,
+                                'loaded_miles': plrow.get('loaded_miles') or 0,
+                                'deadhead_miles': plrow.get('deadhead_miles') or 0,
+                                'rate_per_ton': plrow.get('rate_per_ton') or 0,
+                                'total_revenue': revenue,
+                            }
+                            st.download_button(
+                                "Download live invoice (PDF)",
+                                invoice_preview_pdf(inv_load),
+                                file_name=f"invoice_{plrow.get('bol_number','load')}.pdf",
+                                mime="application/pdf",
+                                key=f"cust_inv_{plrow.get('id')}",
+                            )
     
     with tab_p2:
         st.markdown("#### My Purchase Orders")
