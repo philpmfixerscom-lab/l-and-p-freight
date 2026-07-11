@@ -7,51 +7,14 @@ from fpdf import FPDF
 from lp_helpers.database import DB_PATH, init_db, seed_assets
 from lp_helpers.pay_engine import pay_decision
 from routing_editor import ingest_eld_miles
+from lp_helpers.ui_theme import inject_mobile_css, render_bottom_nav, SCREENS
 
-st.set_page_config(page_title="L & P Freight", layout="wide", page_icon="🚛")
+st.set_page_config(page_title="L & P Freight", layout="centered", page_icon="🚛", initial_sidebar_state="collapsed")
 
-# Custom CSS for top-tier contrast and polish
-st.markdown("""
-<style>
-    .main .block-container {padding-top: 1.5rem; padding-bottom: 2rem;}
-    .stApp {background-color: #d4dce8 !important;}
-    .stMetric {background-color: #e8edf4; border-radius: 12px; padding: 12px; border: 1px solid #b8c5d6;}
-    .stMetric label {font-size: 0.85rem !important; color: #475569 !important;}
-    .stMetric .metric-value {font-size: 1.6rem !important; font-weight: 700; color: #0f172a;}
-    .dark .stMetric {background-color: #1e2937; border: 1px solid #334155;}
-    .dark .stMetric .metric-value {color: #f1f5f9;}
-    
-    .kpi-card {
-        background: #e8edf4;
-        border-radius: 12px;
-        padding: 16px;
-        border: 1px solid #b8c5d6;
-        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-    }
-    .dark .kpi-card {
-        background: #1e2937;
-        border: 1px solid #334155;
-    }
-    
-    .mission-banner {
-        background: linear-gradient(90deg, #0ea5e9 0%, #0284c8 100%);
-        color: white;
-        padding: 14px 20px;
-        border-radius: 10px;
-        margin-bottom: 1rem;
-    }
-    
-    .section-header {
-        font-size: 1.25rem;
-        font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 0.75rem;
-    }
-    .dark .section-header {color: #f1f5f9;}
-    
-    .stDataFrame {border-radius: 10px; overflow: hidden;}
-</style>
-""", unsafe_allow_html=True)
+# Mobile-first native-app theme
+st.markdown('<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">', unsafe_allow_html=True)
+inject_mobile_css()
+st.session_state.setdefault("screen", "Dashboard")
 
 
 def get_conn():
@@ -281,32 +244,41 @@ seed_assets()
 init_customer_portal()
 seed_demo_customers()
 
-# SIDEBAR
-with st.sidebar:
-    st.header("L & P Freight")
-    st.caption("v3.1 • Local Command Center")
-    
-    st.subheader("Trailer")
-    st.write("**39 ft / 24-ton Frameless Lined End-Dump**")
-    st.caption("Maximize loaded miles • Minimize deadhead")
-    
-    st.subheader("Hot Leads")
-    st.write("Sibelco • Covia • K-T Feldspar • Trimac")
+# TOP APP BAR (mobile)
+st.markdown(
+    """
+    <div class="lf-topbar">
+        <div>
+            <div class="lf-topbar-brand">L &amp; P <span>Freight</span></div>
+            <div class="lf-topbar-sub">Spruce Pine NC → Central Georgia</div>
+        </div>
+        <div class="lf-topbar-right">
+            Local Command Center<br><b>v3.2</b>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-# MISSION BANNER
-st.markdown("""
-<div class="mission-banner">
-<b>MISSION:</b> Build loaded miles from Spruce Pine, NC to Central Georgia (Kohler). 
-Every empty mile is margin lost — prioritize backhauls and feldspar/quartz shippers on Hwy 19E & 226.
-</div>
-""", unsafe_allow_html=True)
-
-# TABS
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Dashboard", "Leads & Follow-ups", "Log Load + Deadhead", "Rate Calculator", "Billing & Driver Pay", "Generate BOL", "Customer Portal"])
+# Bottom-nav screen switching (mobile-first)
+screen = st.session_state["screen"]
 
 # ========== DASHBOARD ==========
-with tab1:
-    st.subheader("Dashboard — Today’s Snapshot")
+if screen == "Dashboard":
+    st.markdown(
+        """
+        <div class="lf-trailer-chip">
+            <div class="type">Power Unit</div>
+            <div class="spec">39 ft / 24-ton Frameless Lined End-Dump</div>
+            <div class="lf-trailer-sub">Maximize loaded miles • Minimize deadhead</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+# ========== DASHBOARD ==========
+if screen == "Dashboard":
+    st.markdown('<div class="lf-page-title">Today’s Snapshot</div>', unsafe_allow_html=True)
+    st.caption("Your operational command center")
     
     conn = get_conn()
     leads_df = pd.read_sql("SELECT * FROM leads", conn)
@@ -356,7 +328,9 @@ with tab1:
         st.dataframe(loads_df[['pickup_date', 'commodity', 'weight_tons', 'loaded_miles', 'deadhead_miles', 'total_revenue']].tail(5), use_container_width=True)
 
 # ========== LEADS & FOLLOW-UPS ==========
-with tab2:
+if screen == "Leads":
+    st.markdown('<div class="lf-page-title">Leads &amp; Follow-ups</div>', unsafe_allow_html=True)
+    st.caption("Call the hot shippers — book the loads")
     st.subheader("Leads CRM + Automated Follow-up Sequences")
     
     conn = get_conn()
@@ -397,7 +371,9 @@ with tab2:
         st.rerun()
 
 # ========== LOG LOAD + DEADHEAD ==========
-with tab3:
+if screen == "Log Load":
+    st.markdown('<div class="lf-page-title">Log Load + Deadhead</div>', unsafe_allow_html=True)
+    st.caption("Capture the haul, the miles, and the money")
     st.subheader("Log Load + Track Empty Return Miles")
     
     conn = get_conn()
@@ -506,7 +482,9 @@ with tab3:
             st.rerun()
 
 # ========== RATE CALCULATOR ==========
-with tab4:
+if screen == "Rate Calculator":
+    st.markdown('<div class="lf-page-title">Rate Calculator</div>', unsafe_allow_html=True)
+    st.caption("Quote fast — know your margin before you commit")
     st.subheader("Rate Calculator (with Deadhead)")
     w = st.slider("Tons", 10.0, 24.0, 22.0)
     r = st.number_input("Rate/Ton", 30.0, 120.0, 55.0)
@@ -532,7 +510,9 @@ with tab4:
         st.metric("Est. Net Margin (revenue - driver pay)", f"${net_margin:.2f}")
 
 # ========== BILLING & DRIVER PAY ==========
-with tab5:
+if screen == "Billing & Pay":
+    st.markdown('<div class="lf-page-title">Billing &amp; Driver Pay</div>', unsafe_allow_html=True)
+    st.caption("Pay for the miles they drove — every time")
     st.subheader("Billing & Driver Pay")
     conn = get_conn()
     
@@ -806,7 +786,9 @@ with tab5:
     conn.close()
 
 # ========== BOL ==========
-with tab6:
+if screen == "BOL":
+    st.markdown('<div class="lf-page-title">Generate BOL</div>', unsafe_allow_html=True)
+    st.caption("Bill of lading — PDF, ready to roll")
     st.subheader("Generate BOL")
     st.caption("Create a printable PDF Bill of Lading. Pick a logged load or enter details manually.")
 
@@ -858,7 +840,9 @@ with tab6:
         st.success(f"BOL {bol_no} generated.")
 
 # ========== CUSTOMER PORTAL ==========
-with tab7:
+if screen == "Portal":
+    st.markdown('<div class="lf-page-title">Customer Portal</div>', unsafe_allow_html=True)
+    st.caption("Live tracking & billing your customers see")
     st.subheader("Customer Portal")
     st.caption("Self-service tracking, billing, and dispatch requests.")
     
@@ -1043,3 +1027,6 @@ with tab7:
                     st.rerun()
 
 st.caption("L & P Freight v3.2 — Billing & Driver Pay + Customer Portal + Routing Editor")
+
+# Persistent bottom navigation (mobile-first)
+render_bottom_nav(SCREENS, st.session_state["screen"])
