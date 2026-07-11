@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS loads (
     total_revenue REAL,
     status TEXT DEFAULT 'Logged',
     accepted_at TEXT,
+    bol_photo_path TEXT,
     notes TEXT,
     voice_audio_path TEXT,
     lead_id INTEGER,
@@ -1022,6 +1023,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE loads ADD COLUMN voice_audio_path TEXT")
         if "accepted_at" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN accepted_at TEXT")
+        if "bol_photo_path" not in load_cols:
+            conn.execute("ALTER TABLE loads ADD COLUMN bol_photo_path TEXT")
 
         lead_cols = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
         for col in ("next_followup_date", "followup_type", "notes"):

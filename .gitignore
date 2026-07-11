@@ -72,3 +72,6 @@ _page_meta2.txt
 *.db_dis
 app_v3_recovered.py*
 app.cpython-*.pyc
+
+# Uploaded driver documents (BOL photos etc.)
+bol_photos/

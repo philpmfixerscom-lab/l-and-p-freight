@@ -39,6 +39,7 @@ SCREENS: list[tuple[str, str, str]] = [
     ("BOL", "BOL", "📄"),
     ("Portal", "Portal", "🏢"),
     ("Maps", "Maps", "🗺️"),
+    ("Alerts", "Notifications", "🔔"),
 ]
 
 
