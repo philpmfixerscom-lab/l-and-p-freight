@@ -56,7 +56,9 @@ def get_driver_loads(conn=None) -> dict[str, list[dict[str, Any]]]:
 
 
 def accept_load(load_id: int, status: str = "Accepted") -> None:
-    """Driver accepts a load: stamps accepted_at and flips customer billing live."""
+    """Driver accepts a load: stamps accepted_at, flips customer billing live, queues invoice."""
+    from lp_helpers.billing import queue_invoice
+
     conn = get_conn()
     try:
         conn.execute(
@@ -68,6 +70,7 @@ def accept_load(load_id: int, status: str = "Accepted") -> None:
         conn.commit()
     finally:
         conn.close()
+    queue_invoice(load_id)
 
 
 def save_bol_photo(load_id: int, filename: str, data: bytes) -> str:

@@ -11,6 +11,7 @@ from lp_helpers.ui_theme import inject_mobile_css, render_bottom_nav, SCREENS, e
 from lp_helpers.fleet import get_fleet_view
 from lp_helpers.notifications import get_notifications, dismiss_notification, CATEGORY_META
 from lp_helpers.driver import get_driver_hos, get_driver_loads, accept_load, save_bol_photo
+from lp_helpers.billing import generate_invoice_pdf, fetch_load, mark_invoice_sent
 
 st.set_page_config(page_title="L & P Freight", layout="centered", page_icon="🚛", initial_sidebar_state="collapsed")
 
@@ -474,6 +475,8 @@ if screen == "Log Load":
                     "UPDATE loads SET status=?, accepted_at=datetime('now') WHERE id=?",
                     (new_load_status, int(acc_load["id"])),
                 )
+                from lp_helpers.billing import queue_invoice
+                queue_invoice(int(acc_load["id"]))
             else:
                 conn.execute("UPDATE loads SET status=? WHERE id=?", (new_load_status, int(acc_load["id"])))
             # keep any linked PO load rows in sync
@@ -731,24 +734,27 @@ if screen == "Billing & Pay":
             st.error(f"⚠️ Route variance: {var:+.1f}% — flagged for dispatcher review (threshold ±10%). Pay is unchanged — driver is paid for miles driven.")
         else:
             st.success(f"Route variance: {var:+.1f}% — within tolerance.")
-        st.metric("Total Driver Pay", f"${total_pay:,.2f}", help="Always calculated on actual miles driven.")
-        
-        if st.button("Save Settlement", type="primary", use_container_width=True):
-            conn.execute(
-                """
-                INSERT INTO settlements (load_id, asset_id, driver_name, planned_loaded_miles, actual_loaded_miles, planned_empty_miles, actual_empty_miles, loaded_rate, empty_rate, bonuses, deductions, accessorials, total_pay, variance_pct, status)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (load_id, asset_id, driver_name, planned_loaded, actual_loaded, planned_empty, actual_empty, loaded_rate_in, empty_rate_in, bonuses, deductions, accessorials, total_pay, var, 'Draft')
-            )
-            if use_route_actuals and not routes_df.empty:
-                conn.execute(
-                    "UPDATE routes SET updated_at = datetime('now') WHERE id = ?",
-                    (int(routes_df.iloc[0]['id']),)
+            st.metric("Total Driver Pay", f"${total_pay:,.2f}", help="Always calculated on actual miles driven.")
+            
+            quickpay = st.checkbox("⚡ QuickPay (instant driver pay)", value=False,
+                                   help="Mark this settlement for instant funding.")
+            
+            if st.button("Save Settlement", type="primary", use_container_width=True):
+                cur = conn.execute(
+                    """
+                    INSERT INTO settlements (load_id, asset_id, driver_name, planned_loaded_miles, actual_loaded_miles, planned_empty_miles, actual_empty_miles, loaded_rate, empty_rate, bonuses, deductions, accessorials, total_pay, variance_pct, quickpay, status)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (load_id, asset_id, driver_name, planned_loaded, actual_loaded, planned_empty, actual_empty, loaded_rate_in, empty_rate_in, bonuses, deductions, accessorials, total_pay, var, 1 if quickpay else 0, 'Draft')
                 )
-            conn.commit()
-            st.success("Settlement saved.")
-            st.rerun()
+                if use_route_actuals and not routes_df.empty:
+                    conn.execute(
+                        "UPDATE routes SET updated_at = datetime('now') WHERE id = ?",
+                        (int(routes_df.iloc[0]['id']),)
+                    )
+                conn.commit()
+                st.success("Settlement saved." + (" ⚡ QuickPay queued." if quickpay else ""))
+                st.rerun()
     
     st.divider()
     
@@ -791,7 +797,50 @@ if screen == "Billing & Pay":
             with c2:
                 if st.button("Download Invoice Preview", use_container_width=True):
                     inv_bytes = invoice_preview_pdf(lrow)
-                    st.download_button("Save Invoice", inv_bytes, f"invoice_{srow['bol_number']}_{srow['id']}.pdf", "application/pdf", use_container_width=True)
+                st.download_button("Save Invoice", inv_bytes, f"invoice_{srow['bol_number']}_{srow['id']}.pdf", "application/pdf", use_container_width=True)
+    
+    st.divider()
+    st.markdown("#### Customer Invoices")
+    st.caption("Auto-created the moment a load is accepted. Send or QuickPay in one tap.")
+    inv_conn = get_conn()
+    invoices = pd.read_sql(
+        "SELECT i.id, i.load_id, i.status, i.created_at, l.bol_number, l.shipper, l.total_revenue "
+        "FROM invoices i LEFT JOIN loads l ON i.load_id = l.id ORDER BY i.created_at DESC",
+        inv_conn,
+    )
+    inv_conn.close()
+    if invoices.empty:
+        st.info("No invoices yet — accept a load to auto-generate one.")
+    else:
+        for _, inv in invoices.iterrows():
+            rev = inv.get("total_revenue") or 0
+            pill = "green" if inv["status"] == "Sent" else "amber"
+            st.markdown(
+                f'<div class="lf-card">'
+                f'<div class="lf-row"><b>{inv["bol_number"]}</b>'
+                f'<span class="lf-pill {pill}"><span class="lf-dot"></span>{inv["status"]}</span></div>'
+                f'<div class="lf-muted">{inv["shipper"]} &middot; ${float(rev):,.0f}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                inv_load = fetch_load(int(inv["load_id"])) if inv["load_id"] else None
+                if inv_load is not None:
+                    st.download_button(
+                        "Download", generate_invoice_pdf(inv_load),
+                        file_name=f"invoice_{inv['bol_number']}.pdf", mime="application/pdf",
+                        key=f"inv_dl_{inv['id']}", use_container_width=True,
+                    )
+            with c2:
+                if st.button("Mark Sent", key=f"inv_send_{inv['id']}", use_container_width=True):
+                    mark_invoice_sent(int(inv["id"]))
+                    st.rerun()
+            with c3:
+                if st.button("⚡ QuickPay", key=f"inv_qp_{inv['id']}", use_container_width=True, type="secondary"):
+                    mark_invoice_sent(int(inv["id"]))
+                    st.toast("QuickPay initiated — funds arriving fast.")
+                    st.rerun()
     
     conn.close()
 

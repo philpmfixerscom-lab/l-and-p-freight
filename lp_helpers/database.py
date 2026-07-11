@@ -350,11 +350,21 @@ CREATE TABLE IF NOT EXISTS settlements (
     accessorials REAL DEFAULT 0.0,
     total_pay REAL NOT NULL,
     variance_pct REAL,
+    quickpay INTEGER DEFAULT 0,
     status TEXT DEFAULT 'Draft',
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (load_id) REFERENCES loads(id),
     FOREIGN KEY (asset_id) REFERENCES assets(id)
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    load_id INTEGER,
+    status TEXT DEFAULT 'Draft',
+    created_at TEXT DEFAULT (datetime('now')),
+    sent_at TEXT,
+    FOREIGN KEY (load_id) REFERENCES loads(id)
 );
 
 CREATE TABLE IF NOT EXISTS routes (
@@ -1025,6 +1035,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE loads ADD COLUMN accepted_at TEXT")
         if "bol_photo_path" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN bol_photo_path TEXT")
+
+        settle_cols = {row[1] for row in conn.execute("PRAGMA table_info(settlements)").fetchall()}
+        if "quickpay" not in settle_cols:
+            conn.execute("ALTER TABLE settlements ADD COLUMN quickpay INTEGER DEFAULT 0")
 
         lead_cols = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
         for col in ("next_followup_date", "followup_type", "notes"):
