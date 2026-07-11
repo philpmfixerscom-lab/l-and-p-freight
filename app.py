@@ -7,7 +7,8 @@ from fpdf import FPDF
 from lp_helpers.database import DB_PATH, init_db, seed_assets
 from lp_helpers.pay_engine import pay_decision
 from routing_editor import ingest_eld_miles
-from lp_helpers.ui_theme import inject_mobile_css, render_bottom_nav, SCREENS
+from lp_helpers.ui_theme import inject_mobile_css, render_bottom_nav, SCREENS, empty_state
+from lp_helpers.fleet import get_fleet_view
 
 st.set_page_config(page_title="L & P Freight", layout="centered", page_icon="🚛", initial_sidebar_state="collapsed")
 
@@ -1027,6 +1028,77 @@ if screen == "Portal":
                     st.rerun()
 
 st.caption("L & P Freight v3.2 — Billing & Driver Pay + Customer Portal + Routing Editor")
+
+# ========== LIVE FLEET / MAPS ==========
+if screen == "Maps":
+    st.markdown('<div class="lf-page-title">Live Fleet</div>', unsafe_allow_html=True)
+    st.caption("Real-time truck &amp; load tracking")
+
+    fv = get_fleet_view()
+    v = fv["vehicle"]
+
+    c1, c2 = st.columns(2)
+    c1.metric("Speed", f"{v['speed_mph']:.0f} mph")
+    c2.metric("Heading", f"{v['heading_deg']:.0f}°")
+
+    status_cls = "green" if v["status"] == "Moving" else "amber"
+    st.markdown(
+        f'<div class="lf-pill {status_cls}"><span class="lf-dot"></span>'
+        f'{v["status"]} &middot; {v["vehicle_id"]}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Last ping: {v['reported_at']}" + ("  · demo telemetry" if fv.get("demo") else ""))
+    if st.button("🔄 Refresh telemetry", use_container_width=True, key="maps_refresh"):
+        st.rerun()
+
+    # Schematic lane view (origin -> destination with live truck)
+    st.markdown(
+        '<div class="lf-map-sim">'
+        '<div class="lf-map-pin origin">📍</div>'
+        '<div class="lf-map-route"></div>'
+        '<div class="lf-map-pin dest">🏁</div>'
+        '<div class="lf-map-truck">🚛</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="lf-section">Active Loads</div>', unsafe_allow_html=True)
+    if not fv["active_loads"]:
+        empty_state(
+            "🗺️", "No trucks en route",
+            "Log a load and accept it to start tracking.",
+            cta_label="Go to Log Load", cta_key="maps_log", cta_target="Log Load",
+        )
+    else:
+        for l in fv["active_loads"]:
+            dead = float(l.get("deadhead_miles") or 0)
+            rev = float(l.get("total_revenue") or 0)
+            origin = l.get("origin") or "—"
+            dest = l.get("destination") or "—"
+            pill = {"Accepted": "blue", "In Transit": "orange", "Delivered": "green"}.get(l.get("status"), "gray")
+            st.markdown(
+                f'<div class="lf-card">'
+                f'<div class="lf-row"><b>{l.get("bol_number","—")}</b>'
+                f'<span class="lf-pill {pill}"><span class="lf-dot"></span>{l.get("status")}</span></div>'
+                f'<div class="lf-muted">{l.get("shipper","")} &middot; {l.get("commodity","")}</div>'
+                f'<div style="margin:0.35rem 0;font-weight:700;">{origin} <span style="color:var(--lf-orange)">→</span> {dest}</div>'
+                f'<div class="lf-row"><span class="lf-muted">Deadhead {dead:.0f} mi</span>'
+                f'<b style="color:var(--lf-green)">${rev:,.0f}</b></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    if fv["deadhead_watch"]:
+        st.markdown('<div class="lf-section">Deadhead Watch</div>', unsafe_allow_html=True)
+        for w in fv["deadhead_watch"]:
+            pct = round(w["deadhead_share"] * 100)
+            st.markdown(
+                f'<div class="lf-suggest-card high">'
+                f'<b>{w.get("bol_number","—")}</b> — {pct}% deadhead ({float(w.get("deadhead_miles") or 0):.0f} mi empty). '
+                f'Find a backhaul from {w.get("destination","")} to cut wasted miles.'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
 # Persistent bottom navigation (mobile-first)
 render_bottom_nav(SCREENS, st.session_state["screen"])

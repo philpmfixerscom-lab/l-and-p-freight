@@ -29,7 +29,7 @@ NAV_MORE: list[tuple[str, str, str]] = [
 ALL_NAV_KEYS: list[str] = [item[1] for item in NAV_PRIMARY + NAV_MORE]
 
 
-# The seven real, working screens of the app (label, session key, icon)
+# The real, working screens of the app (label, session key, icon)
 SCREENS: list[tuple[str, str, str]] = [
     ("Dashboard", "Dashboard", "📊"),
     ("Leads", "Leads", "📇"),
@@ -38,6 +38,7 @@ SCREENS: list[tuple[str, str, str]] = [
     ("Pay", "Billing & Pay", "💰"),
     ("BOL", "BOL", "📄"),
     ("Portal", "Portal", "🏢"),
+    ("Maps", "Maps", "🗺️"),
 ]
 
 
@@ -345,7 +346,13 @@ def inject_mobile_css() -> None:
         .lf-traffic.amber {{ background: #fef3c7; color: #92400e; }}
         .lf-traffic.red {{ background: #fee2e2; color: #991b1b; }}
         .lf-voice-panel {{ background: var(--lf-card); border: 1px solid var(--lf-border); border-left: 4px solid var(--lf-blue); border-radius: 14px; padding: 1rem; margin-bottom: 1rem; }}
-        .lf-map-sim {{ height: 120px; background: linear-gradient(90deg, #c5d0de, #dce3ed); border-radius: 14px; border: 1px solid var(--lf-border); position: relative; margin-bottom: 1rem; }}
+        .lf-map-sim {{ height: 140px; background: linear-gradient(90deg, #c5d0de, #dce3ed); border-radius: 14px; border: 1px solid var(--lf-border); position: relative; margin-bottom: 1rem; overflow: hidden; }}
+        .lf-map-route {{ position: absolute; top: 50%; left: 10%; right: 10%; height: 4px; background: var(--lf-orange); border-radius: 2px; transform: translateY(-50%); }}
+        .lf-map-pin {{ position: absolute; top: 50%; transform: translate(-50%, -50%); font-size: 1.1rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }}
+        .lf-map-pin.origin {{ left: 10%; }}
+        .lf-map-pin.dest {{ left: 90%; }}
+        .lf-map-truck {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.7rem; animation: lf-pulse 1.6s ease-in-out infinite; }}
+        @keyframes lf-pulse {{ 0%, 100% {{ opacity: 0.55; transform: translate(-50%, -50%) scale(0.92); }} 50% {{ opacity: 1; transform: translate(-50%, -50%) scale(1.08); }} }}
         .lf-map-route {{ position: absolute; top: 50%; left: 10%; right: 10%; height: 4px; background: var(--lf-orange); border-radius: 2px; transform: translateY(-50%); }}
 
         h1, h2, h3 {{ color: var(--lf-text) !important; }}
@@ -378,8 +385,8 @@ def skeleton(height: int = 64, lines: int = 1) -> None:
 
 
 def empty_state(icon: str, title: str, sub: str = "", cta_label: str | None = None,
-                cta_key: str | None = None) -> None:
-    """Polished empty state with icon, copy and optional CTA."""
+                cta_key: str | None = None, cta_target: str | None = None) -> None:
+    """Polished empty state with icon, copy and optional CTA (navigates if cta_target)."""
     st.markdown(
         f"<div class='lf-empty'><div class='lf-empty-ico'>{icon}</div>"
         f"<div class='lf-empty-title'>{title}</div>"
@@ -387,7 +394,12 @@ def empty_state(icon: str, title: str, sub: str = "", cta_label: str | None = No
         unsafe_allow_html=True,
     )
     if cta_label:
-        st.button(cta_label, key=cta_key or "lf_empty_cta", use_container_width=True)
+        st.button(
+            cta_label,
+            key=cta_key or "lf_empty_cta",
+            use_container_width=True,
+            on_click=lambda t=cta_target: st.session_state.update(screen=t) if t else None,
+        )
 
 
 def inject_ui_css(night_mode: bool = False) -> None:
