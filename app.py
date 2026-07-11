@@ -12,6 +12,7 @@ from lp_helpers.fleet import get_fleet_view
 from lp_helpers.notifications import get_notifications, dismiss_notification, CATEGORY_META
 from lp_helpers.driver import get_driver_hos, get_driver_loads, accept_load, save_bol_photo
 from lp_helpers.billing import generate_invoice_pdf, fetch_load, mark_invoice_sent
+from lp_helpers.recommend import get_recommendations
 
 st.set_page_config(page_title="L & P Freight", layout="centered", page_icon="🚛", initial_sidebar_state="collapsed")
 
@@ -312,6 +313,22 @@ if screen == "Dashboard":
         deadhead_pct = round((total_empty / (total_loaded + total_empty) * 100), 1) if (total_loaded + total_empty) > 0 else 0
         
         st.info(f"**Deadhead Tracking:** {total_empty:,.0f} empty miles logged  •  {deadhead_pct}% of total miles")
+    
+    # AI Copilot — contextual, actionable suggestions
+    st.markdown('<div class="lf-section">🤖 AI Copilot</div>', unsafe_allow_html=True)
+    recs = get_recommendations()
+    if not recs:
+        st.success("All clear — no actionable suggestions right now.")
+    for rec in recs[:4]:
+        st.markdown(
+            f'<div class="lf-suggest-card {rec["severity"]}">'
+            f'<b>{rec["title"]}</b><br><span style="font-size:0.85rem;">{rec["detail"]}</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.button(
+            rec["cta"], key=f"rec_{rec['id']}", use_container_width=True, type="secondary",
+            on_click=lambda s=rec["screen"]: st.session_state.update(screen=s),
+        )
     
     # Follow-up Queue
     st.subheader("📅 Follow-up Queue (Automated)")
