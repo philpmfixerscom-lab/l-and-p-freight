@@ -1169,6 +1169,15 @@ def fetch_leads() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def fetch_assets() -> pd.DataFrame:
+    with closing(get_conn()) as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM assets ORDER BY name",
+            conn,
+        )
+
+
+@st.cache_data(show_spinner=False)
 def fetch_loads() -> pd.DataFrame:
     with closing(get_conn()) as conn:
         return pd.read_sql_query(
