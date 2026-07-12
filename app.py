@@ -13,6 +13,21 @@ from lp_helpers.notifications import get_notifications, dismiss_notification, CA
 from lp_helpers.driver import get_driver_hos, get_driver_loads, accept_load, save_bol_photo
 from lp_helpers.billing import generate_invoice_pdf, fetch_load, mark_invoice_sent
 from lp_helpers.recommend import get_recommendations
+from lp_helpers.loadboard import (
+    fetch_board_loads, filter_board, assign_load,
+    board_status_options, board_shipper_options,
+)
+from lp_helpers.offline_resilience import render_offline_banner, lazy_render, disk_cache, invalidate_cache
+from lp_helpers.global_search import render_global_search_bar, render_search_results_modal
+from lp_helpers.bi_analytics import render_bi_analytics_page
+from lp_helpers.brokerage_authority import render_brokerage_authority_widget, seed_brokerage_authority_items
+from lp_helpers.customer_booking import (
+    render_customer_booking_form, render_dispatcher_review_panel,
+    ensure_dispatch_requests_table, get_pending_dispatch_count,
+)
+from lp_helpers.document_vault import render_document_vault, ensure_documents_table
+from lp_helpers.eld_providers import create_best_eld_provider, SamsaraProvider, MotiveProvider
+from eld_integration import ELDClient
 
 st.set_page_config(page_title="L & P Freight", layout="centered", page_icon="🚛", initial_sidebar_state="collapsed")
 
@@ -249,6 +264,15 @@ seed_assets()
 init_customer_portal()
 seed_demo_customers()
 
+# Initialize ELD client with best available provider
+_eld_client = ELDClient()
+_best_provider = create_best_eld_provider()
+if _best_provider is not None:
+    try:
+        _eld_client.set_provider(_best_provider)
+    except Exception:
+        pass
+
 # TOP APP BAR (mobile)
 _unread = get_notifications()["unread"]
 st.markdown(
@@ -329,6 +353,10 @@ if screen == "Dashboard":
             rec["cta"], key=f"rec_{rec['id']}", use_container_width=True, type="secondary",
             on_click=lambda s=rec["screen"]: st.session_state.update(screen=s),
         )
+
+    if st.button("📋 Open Load Board", key="open_board", use_container_width=True,
+                 on_click=lambda: st.session_state.update(screen="Load Board")):
+        pass
     
     # Follow-up Queue
     st.subheader("📅 Follow-up Queue (Automated)")
@@ -1199,6 +1227,50 @@ if screen == "Driver":
             save_bol_photo(int(l["id"]), up.name, up.getbuffer())
             st.success("BOL photo saved.")
             st.rerun()
+
+# ========== GLOBAL SEARCH ==========
+if screen == "Search":
+    st.markdown('<div class="lf-page-title">🔍 Global Search</div>', unsafe_allow_html=True)
+    st.caption("Search across loads, leads, customers, POs, documents, and more")
+    render_global_search_bar()
+
+# ========== ANALYTICS & BI ==========
+if screen == "Analytics":
+    render_bi_analytics_page()
+
+# ========== DOCUMENTS ==========
+if screen == "Documents":
+    render_document_vault()
+
+# ========== COMPLIANCE / BROKERAGE AUTHORITY ==========
+if screen == "Compliance":
+    seed_brokerage_authority_items()
+    render_brokerage_authority_widget()
+
+# ========== CUSTOMER SELF-SERVE BOOKING ==========
+if screen == "Booking":
+    st.markdown('<div class="lf-page-title">📋 Dispatch Requests</div>', unsafe_allow_html=True)
+    st.caption("Customer self-serve booking and dispatcher review panel")
+    ensure_dispatch_requests_table()
+
+    tab_disp, tab_cust = st.tabs(["📥 Dispatcher Review", "👤 Customer Booking Form"])
+
+    with tab_disp:
+        render_dispatcher_review_panel()
+
+    with tab_cust:
+        customers_df = fetch_customers()
+        if customers_df.empty:
+            st.info("No customers configured. Add customers in the Portal tab first.")
+        else:
+            cust_map = {f"{r['name']} ({r.get('contact_name','')})": int(r['id']) for _, r in customers_df.iterrows()}
+            sel_cust = st.selectbox("Acting as Customer", list(cust_map.keys()), key="booking_customer")
+            cust_id = cust_map[sel_cust]
+            cust_row = customers_df[customers_df['id'] == cust_id].iloc[0]
+            render_customer_booking_form(cust_id, cust_row.get('contact_name', cust_row['name']))
+
+# ========== OFFLINE BANNER ==========
+render_offline_banner()
 
 # Persistent bottom navigation (mobile-first)
 render_bottom_nav(SCREENS, st.session_state["screen"])

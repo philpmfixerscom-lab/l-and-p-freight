@@ -29,3 +29,7 @@ dot number
 emc number 
 llc 
 ein 
+
+
+
+medical card where they can pull a digital copy and also see the expiration date, the truck and trailer have a section where they can have their proof of insurance, license plate, liability insurance, and any other documents they might need or when these documents expire as well -- think about these topics and come up with several additions to be added as well as making a version only dispatch and individuals in the brokerage can acess such as tracking other trucks that might be an issue if other truckers can track other trucks only for dispatch and customers... 
