@@ -237,18 +237,18 @@ def render_load_board_page(
                 row = NC_GA_MARKET_INTEL[idx]
                 try:
                     with closing(get_conn()) as conn:
-                            insert_opportunity(
-                                conn,
-                                lane=row["lane"],
-                                commodity=row["commodity"],
-                                rate=row["rate"],
-                                contact=row["contact"],
-                                notes=row.get("notes", ""),
-                                source="BulkLoads",
-                            )
+                        insert_opportunity(
+                            conn,
+                            lane=row["lane"],
+                            commodity=row["commodity"],
+                            rate=row["rate"],
+                            contact=row["contact"],
+                            notes=row.get("notes", ""),
+                            source="BulkLoads",
+                        )
                         conn.commit()
-                    clear_cache()
-                    st.success("Listing saved to opportunities.")
-                    st.rerun()
+                        clear_cache()
+                        st.success("Listing saved to opportunities.")
+                        st.rerun()
                 except Exception as exc:
                     st.error(f"Import failed: {exc}")

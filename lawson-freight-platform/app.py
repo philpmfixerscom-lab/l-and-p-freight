@@ -735,6 +735,29 @@ CALL_OUTCOMES = [
 SEED_LEADS = LAWSON_SEED_LEADS or []
 
 
+def render_section_header(title: str, icon: str = "") -> None:
+    """Reusable section header with optional icon."""
+    st.markdown(
+        f"""
+        <div style="
+            display:flex;
+            align-items:center;
+            gap:10px;
+            margin:20px 0 12px 0;
+        ">
+            <h2 style="
+                margin:0;
+                font-size:1.35rem;
+                font-weight:700;
+            ">
+                {icon} {title}
+            </h2>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
