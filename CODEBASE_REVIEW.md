@@ -102,7 +102,7 @@ L & P Freight/
 | **AI Engines** | ✅ Complete | Load scoring, OCR sim, voice summary, geofence, insights |
 | **Geofence** | ✅ Complete | Haversine zones, proximity fill, smart arrival prefill |
 | **BOL/PDF** | ✅ Complete | FPDF-based BOL, invoice preview, performance report |
-| **Billing/Driver Pay** | ✅ Complete | Assets, settlements, PDF statements, variance flags |
+| **Billing/Operator Pay** | ✅ Complete | Assets, settlements, PDF statements, variance flags |
 | **Routing** | ✅ Complete | Waypoints, Google vs actual, variance report |
 | **Customer Portal** | ✅ Complete | Customers, POs, bulk load scheduling, role-based view |
 | **ELD Integration** | ✅ Stub | Facade complete, vendor stubs raise NotImplementedError |
@@ -115,7 +115,7 @@ L & P Freight/
 ## Test Coverage
 
 - **22 tests total, 22 passing**
-- `tests/test_routing.py` — 17 tests: variance analysis, driver pay, route validation, lifecycle, fairness
+- `tests/test_routing.py` — 17 tests: variance analysis, operator pay, route validation, lifecycle, fairness
 - `tests/test_portal.py` — 5 tests: seed customers, PO CRUD, status transitions, summary, billing visibility
 
 **Not covered:** UI rendering, ELD vendor stubs, BOL PDF generation, geofence logic, bulk import edge cases.

@@ -97,7 +97,7 @@ def inject_ui_css(night_mode: bool = False) -> None:
             box-shadow: 4px 0 24px var(--lf-shadow);
         }}
         section[data-testid="stSidebar"] * {{
-            color: #e2e8f0 !important;
+            color: var(--lf-text) !important;
         }}
         section[data-testid="stSidebar"] .stRadio label,
         section[data-testid="stSidebar"] .stSelectbox label {{
@@ -111,16 +111,19 @@ def inject_ui_css(night_mode: bool = False) -> None:
             border-radius: 10px !important;
             margin-bottom: 0.35rem !important;
             padding: 0.6rem 0.75rem !important;
+            transition: background 0.15s, border-color 0.15s, transform 0.1s;
         }}
         section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {{
             background: rgba(232,93,4,0.15) !important;
             border-color: var(--lf-orange) !important;
+            transform: translateX(2px);
         }}
         section[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"],
         section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {{
             background: var(--lf-orange) !important;
             border-color: var(--lf-orange) !important;
-            color: white !important;
+            color: var(--lf-sidebar) !important;
+            font-weight: 700 !important;
         }}
 
         /* Buttons — large, obvious */
@@ -144,13 +147,24 @@ def inject_ui_css(night_mode: bool = False) -> None:
             border: 2px solid var(--lf-border) !important;
         }}
 
-        /* Forms & inputs */
+        /* Forms & inputs — consistent sizing + validation states */
         .stTextInput input, .stNumberInput input, .stTextArea textarea,
         .stSelectbox > div > div {{
             min-height: 46px !important;
             font-size: 1rem !important;
             border-radius: 10px !important;
             border: 1px solid var(--lf-border) !important;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }}
+        .stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus,
+        .stSelectbox > div > div:focus {{
+            border-color: var(--lf-orange) !important;
+            box-shadow: 0 0 0 3px rgba(232,93,4,0.12) !important;
+        }}
+        .stTextInput input:disabled, .stNumberInput input:disabled, .stTextArea textarea:disabled {{
+            opacity: 0.6 !important;
+            cursor: not-allowed !important;
+            background: var(--lf-bg) !important;
         }}
         div[data-testid="stForm"] {{
             background: var(--lf-card);
@@ -159,16 +173,94 @@ def inject_ui_css(night_mode: bool = False) -> None:
             padding: 1.25rem;
             box-shadow: 0 2px 8px var(--lf-shadow);
         }}
+        div[data-testid="stForm"] > div {{
+            gap: 0.75rem !important;
+        }}
+
+        /* Validation / status messages */
+        .stSuccess, div[data-testid="stSuccess"] {{
+            border-left: 4px solid var(--lf-green) !important;
+            border-radius: 10px !important;
+        }}
+        .stError, div[data-testid="stError"] {{
+            border-left: 4px solid var(--lf-red) !important;
+            border-radius: 10px !important;
+        }}
+        .stWarning, div[data-testid="stWarning"] {{
+            border-left: 4px solid var(--lf-amber) !important;
+            border-radius: 10px !important;
+        }}
+        .stInfo, div[data-testid="stInfo"] {{
+            border-left: 4px solid var(--lf-blue) !important;
+            border-radius: 10px !important;
+        }}
+
+        /* Expanders */
+        div[data-testid="stExpander"] {{
+            border: 1px solid var(--lf-border) !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            margin-bottom: 0.75rem !important;
+            background: var(--lf-card) !important;
+        }}
+        div[data-testid="stExpander"] details {{
+            border: none !important;
+        }}
+        div[data-testid="stExpander"] summary {{
+            font-weight: 700 !important;
+            font-size: 0.95rem !important;
+            padding: 0.85rem 1rem !important;
+            color: var(--lf-text) !important;
+            transition: background 0.15s;
+        }}
+        div[data-testid="stExpander"] summary:hover {{
+            background: rgba(232,93,4,0.04) !important;
+        }}
+
+        /* Dividers */
+        hr, .stDivider {{
+            border: none !important;
+            border-top: 1px solid var(--lf-border) !important;
+            margin: 1.25rem 0 !important;
+        }}
+
+        /* Smooth transitions for interactive elements */
+        .stButton > button, .stDownloadButton > button {{
+            transition: transform 0.1s, opacity 0.1s, background 0.15s;
+        }}
+        .stButton > button:active {{
+            transform: scale(0.98);
+        }}
+
+        /* Caption / helper text */
+        .stCaption, div[data-testid="stCaption"] {{
+            color: var(--lf-muted) !important;
+            font-size: 0.85rem !important;
+        }}
+
+        /* Subheader */
+        .stSubheader, div[data-testid="stSubheader"] {{
+            color: var(--lf-text) !important;
+            font-weight: 700 !important;
+            font-size: 1.1rem !important;
+            margin-bottom: 0.75rem !important;
+        }}
 
         /* Tabs */
         .stTabs [data-baseweb="tab"] {{
             font-size: 1rem !important;
             font-weight: 700 !important;
             padding: 0.75rem 1.25rem !important;
+            border-radius: 10px 10px 0 0 !important;
+            transition: background 0.15s, color 0.15s;
         }}
         .stTabs [data-baseweb="tab"][aria-selected="true"] {{
             color: var(--lf-orange) !important;
             border-bottom: 3px solid var(--lf-orange) !important;
+            background: rgba(232,93,4,0.06) !important;
+        }}
+        .stTabs [data-baseweb="tab"]:hover {{
+            background: rgba(232,93,4,0.04) !important;
         }}
 
         /* Metrics */
@@ -194,7 +286,7 @@ def inject_ui_css(night_mode: bool = False) -> None:
         .lf-sidebar-logo h1 {{
             font-size: 1.35rem !important;
             font-weight: 800 !important;
-            color: #fff !important;
+            color: var(--lf-text) !important;
             margin: 0 !important;
             letter-spacing: -0.02em;
         }}
@@ -202,7 +294,7 @@ def inject_ui_css(night_mode: bool = False) -> None:
         .lf-sidebar-tag {{
             font-size: 0.75rem;
             font-weight: 600;
-            color: #94a3b8;
+            color: var(--lf-muted);
             margin-top: 0.15rem;
         }}
         .lf-trailer-chip {{
@@ -216,17 +308,17 @@ def inject_ui_css(night_mode: bool = False) -> None:
             font-size: 0.7rem;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #94a3b8;
+            color: var(--lf-muted);
         }}
         .lf-trailer-chip .spec {{
             font-size: 0.9rem;
             font-weight: 700;
-            color: #f8fafc;
+            color: var(--lf-text);
         }}
         .lp-mission {{
             font-size: 0.8rem;
             line-height: 1.5;
-            color: #cbd5e1;
+            color: var(--lf-muted);
             padding: 0.5rem 0;
         }}
         .nav-group-label {{
@@ -234,7 +326,7 @@ def inject_ui_css(night_mode: bool = False) -> None:
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.1em;
-            color: #64748b !important;
+            color: var(--lf-muted) !important;
             margin: 0.75rem 0 0.35rem 0;
         }}
 
@@ -287,6 +379,9 @@ def inject_ui_css(night_mode: bool = False) -> None:
             margin: 1.5rem 0 0.75rem;
             padding-bottom: 0.5rem;
             border-bottom: 2px solid var(--lf-border);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }}
 
         /* Lane banner — simple */
@@ -332,6 +427,11 @@ def inject_ui_css(night_mode: bool = False) -> None:
             border-radius: 12px;
             padding: 1rem;
             box-shadow: 0 1px 4px var(--lf-shadow);
+            transition: transform 0.1s, box-shadow 0.15s;
+        }}
+        .lf-kpi:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px var(--lf-shadow);
         }}
         .lf-kpi-label {{
             font-size: 0.75rem;
@@ -377,13 +477,14 @@ def inject_ui_css(night_mode: bool = False) -> None:
             font-weight: 600;
             padding: 0.2rem 0.55rem;
             border-radius: 6px;
-            background: #d8e0ea;
+            background: rgba(255,255,255,0.08);
             color: var(--lf-muted);
             border: 1px solid var(--lf-border);
+            display: inline-block;
         }}
-        .lf-badge.commodity {{ background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }}
-        .lf-badge.weight {{ background: #dcfce7; color: #15803d; border-color: #86efac; }}
-        .lf-badge.status {{ background: #ffedd5; color: #c2410c; border-color: #fdba74; }}
+        .lf-badge.commodity {{ background: rgba(59,130,246,0.15); color: var(--lf-blue); border-color: rgba(59,130,246,0.3); }}
+        .lf-badge.weight {{ background: rgba(34,197,94,0.12); color: var(--lf-green); border-color: rgba(34,197,94,0.25); }}
+        .lf-badge.status {{ background: rgba(232,93,4,0.12); color: var(--lf-orange); border-color: rgba(232,93,4,0.25); }}
         .lf-lead-name {{ font-weight: 700; font-size: 1rem; color: var(--lf-text); }}
         .lf-lead-phone {{ font-size: 1rem; margin: 0.25rem 0; }}
         .lf-lead-phone a {{ color: var(--lf-blue) !important; font-weight: 700; text-decoration: none; }}
@@ -422,20 +523,21 @@ def inject_ui_css(night_mode: bool = False) -> None:
 
         /* Misc */
         .lf-suggest-card {{
-            background: #fffbeb;
-            border: 1px solid #fde68a;
+            background: rgba(251,191,36,0.08);
+            border: 1px solid rgba(251,191,36,0.25);
             border-left: 4px solid var(--lf-amber);
             border-radius: 10px;
             padding: 0.75rem 1rem;
             margin-bottom: 0.5rem;
             font-size: 0.9rem;
+            color: var(--lf-text);
         }}
-        .lf-suggest-card.critical {{ background: #fef2f2; border-color: #fecaca; border-left-color: var(--lf-red); }}
-        .lf-suggest-card.high {{ background: #fff7ed; border-color: #fed7aa; border-left-color: var(--lf-orange); }}
-        .lf-suggest-card.low {{ background: #f0fdf4; border-color: #bbf7d0; border-left-color: var(--lf-green); }}
+        .lf-suggest-card.critical {{ background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.25); border-left-color: var(--lf-red); }}
+        .lf-suggest-card.high {{ background: rgba(232,93,4,0.08); border-color: rgba(232,93,4,0.25); border-left-color: var(--lf-orange); }}
+        .lf-suggest-card.low {{ background: rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.25); border-left-color: var(--lf-green); }}
         .lp-privacy {{
             font-size: 0.72rem;
-            color: #64748b;
+            color: var(--lf-muted);
             line-height: 1.4;
             padding: 0.5rem 0;
         }}
@@ -448,9 +550,9 @@ def inject_ui_css(night_mode: bool = False) -> None:
             padding: 0.25rem 0.6rem;
             border-radius: 20px;
         }}
-        .lf-traffic.green {{ background: #dcfce7; color: #166534; }}
-        .lf-traffic.amber {{ background: #fef3c7; color: #92400e; }}
-        .lf-traffic.red {{ background: #fee2e2; color: #991b1b; }}
+        .lf-traffic.green {{ background: rgba(34,197,94,0.15); color: var(--lf-green); }}
+        .lf-traffic.amber {{ background: rgba(245,158,11,0.15); color: var(--lf-amber); }}
+        .lf-traffic.red {{ background: rgba(239,68,68,0.15); color: var(--lf-red); }}
         .lf-voice-panel {{
             background: var(--lf-card);
             border: 1px solid var(--lf-border);
@@ -472,7 +574,7 @@ def inject_ui_css(night_mode: bool = False) -> None:
         }}
         .lf-map-sim {{
             height: 120px;
-            background: linear-gradient(90deg, #c5d0de, #dce3ed);
+            background: linear-gradient(90deg, var(--lf-border), var(--lf-card));
             border-radius: 12px;
             border: 1px solid var(--lf-border);
             position: relative;
@@ -488,6 +590,115 @@ def inject_ui_css(night_mode: bool = False) -> None:
         }}
         .lf-geo-card, .lf-bulk-stat {{ border-radius: 10px; }}
         h1, h2, h3 {{ color: var(--lf-text) !important; }}
+
+        /* Dataframes / tables */
+        div[data-testid="stDataFrame"] {{
+            border: 1px solid var(--lf-border) !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+        }}
+        div[data-testid="stDataFrame"] table {{
+            border-collapse: collapse !important;
+            width: 100% !important;
+        }}
+        div[data-testid="stDataFrame"] table thead th {{
+            background: var(--lf-card) !important;
+            color: var(--lf-text) !important;
+            font-weight: 700 !important;
+            font-size: 0.85rem !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.03em !important;
+            padding: 0.75rem 0.85rem !important;
+            border-bottom: 2px solid var(--lf-border) !important;
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 1 !important;
+        }}
+        div[data-testid="stDataFrame"] table tbody tr:nth-child(odd) {{
+            background: rgba(255,255,255,0.02) !important;
+        }}
+        div[data-testid="stDataFrame"] table tbody tr:hover {{
+            background: rgba(232,93,4,0.06) !important;
+        }}
+        div[data-testid="stDataFrame"] table tbody td {{
+            padding: 0.65rem 0.85rem !important;
+            font-size: 0.9rem !important;
+            color: var(--lf-text) !important;
+            border-bottom: 1px solid var(--lf-border) !important;
+        }}
+
+        /* Focus indicators */
+        .stButton > button:focus-visible,
+        .stTextInput input:focus-visible,
+        .stNumberInput input:focus-visible,
+        .stTextArea textarea:focus-visible,
+        .stSelectbox > div > div:focus-visible {{
+            outline: 2px solid var(--lf-orange) !important;
+            outline-offset: 2px !important;
+        }}
+        section[data-testid="stSidebar"] div[role="radiogroup"] label:focus-visible {{
+            outline: 2px solid var(--lf-orange) !important;
+            outline-offset: 2px !important;
+        }}
+
+        /* Empty states */
+        .lf-empty-state {{
+            text-align: center;
+            padding: 2.5rem 1.5rem;
+            color: var(--lf-muted);
+            border: 2px dashed var(--lf-border);
+            border-radius: 14px;
+            margin: 1rem 0;
+        }}
+        .lf-empty-state-icon {{
+            font-size: 2.5rem;
+            margin-bottom: 0.75rem;
+            display: block;
+        }}
+        .lf-empty-state-title {{
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--lf-text);
+            margin-bottom: 0.35rem;
+        }}
+        .lf-empty-state-body {{
+            font-size: 0.9rem;
+            max-width: 32ch;
+            margin: 0 auto;
+            line-height: 1.5;
+        }}
+
+        /* Card hover polish */
+        .lf-load-card, .lf-lead-card, .lf-panel, .lf-call-log-card {{
+            transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+        }}
+        .lf-load-card:hover, .lf-lead-card:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px var(--lf-shadow);
+        }}
+
+        /* Suggestion card theme tokens */
+        .lf-suggest-card {{
+            background: rgba(251,191,36,0.08);
+            border: 1px solid rgba(251,191,36,0.25);
+            border-left: 4px solid var(--lf-amber);
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--lf-text);
+        }}
+        .lf-suggest-card.critical {{ background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.25); border-left-color: var(--lf-red); }}
+        .lf-suggest-card.high {{ background: rgba(232,93,4,0.08); border-color: rgba(232,93,4,0.25); border-left-color: var(--lf-orange); }}
+        .lf-suggest-card.low {{ background: rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.25); border-left-color: var(--lf-green); }}
+
+        /* Privacy banner */
+        .lp-privacy {{
+            font-size: 0.72rem;
+            color: var(--lf-muted);
+            line-height: 1.4;
+            padding: 0.5rem 0;
+        }}
         </style>
         """,
         unsafe_allow_html=True,

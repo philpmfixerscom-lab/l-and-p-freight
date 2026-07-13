@@ -1,1 +1,0 @@
-"""L & P Dispatch v3.0 Freight OS — load board, analytics, BOL, pages, database."""

@@ -9,7 +9,7 @@ Spruce Pine NC · 39ft / 24-ton lined end-dump · Spruce Pine → Central Georgi
 
 L & P Dispatch Freight OS is a **premium, offline-capable command center** built for a single-truck operation that needs to **look and perform like 2026 freight tech** — without giving up data ownership. Every record lives on your machine. AI is **transparent and rule-based** (no black-box ML). Phillip and Lawson make every final call.
 
-**Sell it in 60 seconds:** Settings → **LOAD DEMO DATA** → Dashboard → AI Intelligence → Documents.
+**Quick demo:** Settings → **LOAD DEMO DATA** → Dashboard → AI Intelligence → Documents.
 
 ---
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import sqlite3
 import uuid
 from contextlib import closing
@@ -50,7 +51,16 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "lp_dispatch.db"
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
+BACKUP_DIR = BASE_DIR / "backups"
 APP_VERSION = "4.4 BIG E"
+TRAILER_MAX_TONS = 24
+APPROVED_COMMODITIES = [
+    "Feldspar", "Mica", "Spar", "Clay", "Rock",
+    "Lime", "Fertilizer", "Sand", "Gravel", "Aggregate", "Other",
+]
+TARGET_LANE_ORIGIN = "Spruce Pine, NC"
+TARGET_LANE_DESTINATION = "Central Georgia (Kohler area)"
+DEFAULT_LANE_MILES = 285
 
 try:
     from lp_helpers.lawson_profile import (
@@ -58,7 +68,7 @@ try:
         BIG_E_TAGLINE,
         CARRIER_NAME,
         DEFAULT_OWNER,
-        DRIVERS,
+        OWNERS,
         HIGHWAY_CORRIDORS,
         LAWSON_GEOFENCES,
         LAWSON_SEED_LEADS,
@@ -76,7 +86,7 @@ except ImportError:
     BIG_E_MODE = True
     BIG_E_TAGLINE = "BIG E Elite Refresh — Stable, Automated, Competitive"
     CARRIER_NAME = "L & P Dispatch"
-    PLATFORM_TITLE = "Lawson Freight Platform — BIG E Elite Refresh"
+    PLATFORM_TITLE = "Lawson Freight Platform"
     PAGE_TITLE = "Lawson Freight"
     TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
     MISSION_BLURB = (
@@ -84,7 +94,7 @@ except ImportError:
         "Minimize deadhead on Hwy 19E & 226."
     )
     DEFAULT_OWNER = "Phillip"
-    DRIVERS = ("Phillip", "Lawson")
+    OWNERS = ("Phillip", "Lawson")
     TRUCK_LABEL = "L&P Lawson End-Dump"
     TRAILER_DESC = "39ft Frameless End-Dump"
     HIGHWAY_CORRIDORS = "Hwy 19E & 226"
@@ -131,7 +141,7 @@ SMS_TEMPLATES: dict[str, str] = {
         "L & P FREIGHT | ARRIVAL\n"
         "{company}\n"
         "On site: {location}\n"
-        "Driver: {driver} · 39ft end-dump\n"
+        "Owner: {driver} · 39ft end-dump\n"
         "Reply STOP to opt out."
     ),
     "load update": (
@@ -258,13 +268,13 @@ def get_active_owner() -> str:
         from lp_helpers.ui_components import get_owner_role
 
         role = get_owner_role()
-        return role if role in DRIVERS else DEFAULT_OWNER
+        return role if role in OWNERS else DEFAULT_OWNER
     except ImportError:
         return _local_get_setting("owner_role", DEFAULT_OWNER) or DEFAULT_OWNER
 
 
 def set_active_owner(role: str) -> None:
-    if role not in DRIVERS:
+    if role not in OWNERS:
         return
     persist_setting("owner_role", role)
 
@@ -327,7 +337,7 @@ EMAIL_TEMPLATES: dict[str, str] = {
         "L & P FREIGHT — Arrival Notice\n\n"
         "Company: {company}\n"
         "On site: {location}\n"
-        "Driver: Phillip · 39ft frameless end-dump\n"
+        "Owner: Phillip · 39ft frameless end-dump\n"
         "Lane: Spruce Pine NC → Central GA"
     ),
     "load update": (
@@ -448,7 +458,7 @@ def dispatch_emergency(
     message: str,
     context: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Log incident and annotate active load — no personal SMS; drivers call official numbers."""
+    """Log incident and annotate active load — no personal SMS; owners call official numbers."""
     log_sms_event(None, f"emergency_{emergency_key}", message, "emergency")
 
     load_noted = False
@@ -623,6 +633,7 @@ def inject_elite_dark_css() -> None:
             --lf-blue: #7dd3fc;
             --lf-red: #fb7185;
             --lf-sidebar: #060a10;
+            --lf-shadow: rgba(0,0,0,0.35);
         }
         .stApp { background: var(--lf-bg) !important; }
         div[data-testid="stMetric"] label { color: var(--lf-muted) !important; }
@@ -631,7 +642,7 @@ def inject_elite_dark_css() -> None:
         }
         .stTextInput input, .stNumberInput input, .stTextArea textarea,
         .stSelectbox > div > div {
-            background: #1a2436 !important;
+            background: var(--lf-card) !important;
             color: var(--lf-text) !important;
             border-color: var(--lf-border) !important;
         }
@@ -640,8 +651,8 @@ def inject_elite_dark_css() -> None:
             display: inline-block; padding: 0.25rem 0.65rem; border-radius: 20px;
             font-size: 0.75rem; font-weight: 700; margin-right: 0.5rem;
         }
-        .lf-gps-badge.live { background: #064e3b; color: #6ee7b7; }
-        .lf-gps-badge.sim { background: #422006; color: #fdba74; }
+        .lf-gps-badge.live { background: rgba(94,234,212,0.15); color: var(--lf-green); }
+        .lf-gps-badge.sim { background: rgba(251,146,60,0.15); color: var(--lf-orange); }
         </style>
         """,
         unsafe_allow_html=True,
@@ -723,6 +734,68 @@ CALL_OUTCOMES = [
 
 SEED_LEADS = LAWSON_SEED_LEADS or []
 
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+def validate_load_inputs(
+    shipper: str,
+    commodity: str,
+    weight: float,
+    rate_per_ton: float,
+    total_revenue: float,
+    pricing_mode: str,
+) -> list[str]:
+    errors = []
+    if not shipper or not str(shipper).strip():
+        errors.append("Shipper is required.")
+    if not commodity or not str(commodity).strip():
+        errors.append("Commodity is required.")
+    if weight is None or weight <= 0:
+        errors.append("Weight must be greater than zero.")
+    if weight > TRAILER_MAX_TONS:
+        errors.append(f"Weight exceeds {TRAILER_MAX_TONS}-ton trailer limit.")
+    if pricing_mode == "Rate per ton" and (rate_per_ton is None or rate_per_ton <= 0):
+        errors.append("Enter a valid rate per ton.")
+    if pricing_mode == "Total revenue" and (total_revenue is None or total_revenue <= 0):
+        errors.append("Enter a valid total revenue.")
+    return errors
+
+
+def validate_bol_load(load: dict[str, Any]) -> list[str]:
+    errors = []
+    if not load.get("bol_number"):
+        errors.append("Load is missing a BOL number.")
+    if not load.get("shipper"):
+        errors.append("Load is missing a shipper.")
+    if not load.get("commodity"):
+        errors.append("Load is missing a commodity.")
+    if not load.get("weight_tons") or float(load.get("weight_tons", 0)) <= 0:
+        errors.append("Load has invalid weight.")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Auto-backup
+# ---------------------------------------------------------------------------
+
+def auto_backup_db() -> None:
+    try:
+        if not DB_PATH.exists():
+            return
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = BACKUP_DIR / f"lp_dispatch_{stamp}.db"
+        shutil.copy2(DB_PATH, dest)
+        log.info("Auto-backup created: %s", dest)
+    except Exception as exc:
+        log.warning("Auto-backup skipped: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# DB init + seed
+# ---------------------------------------------------------------------------
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -946,7 +1019,7 @@ def generate_bol_pdf(load: dict) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, "Lawson Freight Platform — BIG E", ln=True)
+    pdf.cell(0, 10, "Lawson Freight Platform", ln=True)
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(0, 6, "Bill of Lading - Spruce Pine NC - 39ft frameless end-dump", ln=True)
     pdf.ln(4)
@@ -1162,7 +1235,7 @@ def navigate_to_tab(tab_name: str) -> None:
 
 def _persist_owner_role() -> None:
     role = st.session_state.get("lawson_owner_role", DEFAULT_OWNER)
-    if role in DRIVERS:
+    if role in OWNERS:
         set_active_owner(role)
 
 
@@ -1171,8 +1244,8 @@ def render_lawson_sidebar_extras() -> None:
     active = get_active_owner()
     st.selectbox(
         "Operating as",
-        list(DRIVERS),
-        index=list(DRIVERS).index(active) if active in DRIVERS else 0,
+        list(OWNERS),
+                index=list(OWNERS).index(active) if active in OWNERS else 0,
         key="lawson_owner_role",
         on_change=_persist_owner_role,
     )
@@ -1180,31 +1253,19 @@ def render_lawson_sidebar_extras() -> None:
 
 def render_sidebar() -> None:
     with st.sidebar:
-        st.header("Mission Control")
-        st.markdown(f"**{CARRIER_NAME}**")
-        st.write("**Spruce Pine NC → Central GA**")
-        st.write(f"**{TRAILER_DESC}**")
+        render_sidebar_brand(
+            carrier=CARRIER_NAME,
+            lane_origin=TARGET_LANE_ORIGIN,
+            lane_dest=TARGET_LANE_DESTINATION,
+            trailer=TRAILER_DESC,
+        )
         render_lawson_sidebar_extras()
-        st.divider()
-        st.markdown(f"**Corridor:** {HIGHWAY_CORRIDORS}")
-        st.markdown(f"**Receiver:** {PRIMARY_RECEIVER}")
-        st.divider()
-        st.subheader("Trailer Specs")
-        st.markdown("- **Type:** 39 ft frameless end-dump")
-        st.markdown("- **Rated capacity:** ~24 tons")
-        st.divider()
-        st.subheader("Approved Commodities")
-        for commodity in APPROVED_COMMODITIES[:8]:
-            st.markdown(f"- {commodity}")
-        st.divider()
-        st.caption(f"Database: `{DB_PATH.name}`")
-        if st.button("📱 Driver App", use_container_width=True):
+        st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
+        render_day_night_toggle()
+        if st.button("🚛 Driver View", use_container_width=True):
             st.session_state.view_mode = "driver"
             st.rerun()
-        if BIG_E_MODE:
-            st.caption(f"**BIG E MODE** · {TAGLINE}")
-        else:
-            st.caption(f"{TAGLINE} · {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        st.caption(TAGLINE)
 
 
 def render_target_lane_banner() -> None:
@@ -1218,7 +1279,7 @@ def render_target_lane_banner() -> None:
     with lane_col2:
         st.markdown(
             "<div style='text-align:center;font-size:1.4rem;font-weight:800;"
-            "color:#e85d04;padding:0.25rem 0;'>➜ TARGET LANE ➜</div>",
+            "color:var(--lf-orange);padding:0.25rem 0;'>➜ TARGET LANE ➜</div>",
             unsafe_allow_html=True,
         )
     with lane_col3:
@@ -1284,7 +1345,7 @@ def render_dashboard_tab() -> None:
         navigate_to_tab("BOL")
 
     st.divider()
-    st.markdown("#### Analytics")
+    render_section_header("Analytics", icon="📊")
 
     if not loads_df.empty and px is not None:
         try:
@@ -1339,19 +1400,33 @@ def render_dashboard_tab() -> None:
                 )
                 st.plotly_chart(fig, use_container_width=True)
     elif loads_df.empty:
-        st.caption("Log loads to unlock Plotly revenue and deadhead charts.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📋",
+            "No loads logged yet",
+            "Log your first load in the Logger tab to unlock revenue and deadhead analytics.",
+        )
     else:
-        st.caption("Install plotly for interactive dashboard charts: pip install plotly")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📊",
+            "Plotly not installed",
+            "Install plotly for interactive dashboard charts: pip install plotly",
+        )
 
     st.divider()
-    st.markdown("#### Recent Activity")
+    render_section_header("Recent Activity", icon="🕒")
 
     activity_left, activity_right = st.columns(2)
 
     with activity_left:
         st.markdown("**Last 5 Loads**")
         if loads_df.empty:
-            st.caption("No loads logged yet.")
+            from lp_helpers.ui_components import render_empty_state
+
+            render_empty_state("📦", "No loads logged yet.")
         else:
             load_cols = [
                 c
@@ -1374,13 +1449,17 @@ def render_dashboard_tab() -> None:
     with activity_right:
         st.markdown("**Last 5 Lead Notes**")
         if leads_df.empty:
-            st.caption("No leads in CRM.")
+            from lp_helpers.ui_components import render_empty_state
+
+            render_empty_state("📝", "No leads in CRM.")
         else:
             notes_df = leads_df.copy()
             notes_df["notes"] = notes_df["notes"].fillna("").astype(str)
             notes_df = notes_df[notes_df["notes"].str.strip() != ""]
             if notes_df.empty:
-                st.caption("No lead notes recorded yet.")
+                from lp_helpers.ui_components import render_empty_state
+
+                render_empty_state("💬", "No lead notes recorded yet.")
             else:
                 sort_col = (
                     "last_contact"
@@ -1407,7 +1486,13 @@ def render_leads_crm_tab() -> None:
 
     leads_df = fetch_leads()
     if leads_df.empty:
-        st.warning("No leads found. Database will seed hot leads on next refresh.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📞",
+            "No leads found",
+            "Hot leads will seed automatically on next refresh, or add them manually.",
+        )
         return
 
     fc1, fc2 = st.columns([1, 2])
@@ -1442,14 +1527,14 @@ def render_leads_crm_tab() -> None:
         )
         filtered = filtered[mask]
 
-    st.markdown("#### All Leads")
+    render_section_header("All Leads", icon="👥")
     display_df = filtered[
         [c for c in ["company", "phone", "commodity_focus", "status", "last_contact", "notes"] if c in filtered.columns]
     ]
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     st.divider()
-    st.markdown("#### Log New Call / Update Lead")
+    render_section_header("Log New Call / Update Lead", icon="📞")
 
     lead_options = {
         f"{row['company']} (ID {row['id']})": int(row["id"])
@@ -1511,10 +1596,12 @@ def render_leads_crm_tab() -> None:
             st.error(f"Could not save lead update: {exc}")
 
     st.divider()
-    st.markdown("#### Recent Calls")
+    render_section_header("Recent Calls", icon="🕒")
     calls_df = fetch_call_logs()
     if calls_df.empty:
-        st.caption("No calls logged yet.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state("📞", "No calls logged yet.")
     else:
         call_cols = [c for c in ["logged_at", "company", "call_type", "outcome", "notes"] if c in calls_df.columns]
         st.dataframe(calls_df[call_cols].head(10), use_container_width=True, hide_index=True)
@@ -1539,7 +1626,7 @@ def render_load_logger_tab() -> None:
     if prefill_commodity not in commodity_options:
         prefill_commodity = "Other"
 
-    st.markdown("#### Log New Load")
+    render_section_header("Log New Load", icon="📝")
     row1a, row1b = st.columns(2)
     pickup = row1a.date_input(
         "Date",
@@ -1665,16 +1752,17 @@ def render_load_logger_tab() -> None:
     submitted = st.button("Save Load", type="primary", use_container_width=True, key="save_load_btn")
 
     if submitted:
-        if not shipper or not str(shipper).strip():
-            st.error("Shipper is required.")
-        elif not preview_commodity or not str(preview_commodity).strip():
-            st.error("Commodity is required.")
-        elif weight <= 0:
-            st.error("Weight must be greater than zero.")
-        elif rate_preview <= 0 or revenue_preview <= 0:
-            st.error("Enter a valid rate per ton or total revenue.")
-        elif weight > TRAILER_MAX_TONS:
-            st.error(f"Weight exceeds {TRAILER_MAX_TONS}-ton trailer limit.")
+        errors = validate_load_inputs(
+            shipper=shipper,
+            commodity=preview_commodity,
+            weight=weight,
+            rate_per_ton=rate_input if pricing_mode == "Rate per ton" else 0.0,
+            total_revenue=revenue_input if pricing_mode == "Total revenue" else 0.0,
+            pricing_mode=pricing_mode,
+        )
+        if errors:
+            for err in errors:
+                st.error(err)
         else:
             miles = float(
                 st.session_state.get("_load_prefill_miles", DEFAULT_LANE_MILES)
@@ -1740,7 +1828,7 @@ def render_load_logger_tab() -> None:
             st.rerun()
 
     st.divider()
-    st.markdown("#### Recent Logged Loads")
+    render_section_header("Recent Logged Loads", icon="📋")
     loads_df = fetch_loads()
     lf1, lf2 = st.columns([1, 2])
     load_status_filter = lf1.selectbox(
@@ -1764,7 +1852,9 @@ def render_load_logger_tab() -> None:
         save_filter("filter_loads_search", load_search)
 
     if loads_df.empty:
-        st.caption("No loads logged yet.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state("📋", "No loads logged yet.")
     else:
         view = loads_df.copy()
         if load_status_filter != "All":
@@ -2014,7 +2104,7 @@ def render_load_board_tab() -> None:
             else:
                 st.error("Lane is required.")
 
-    st.markdown("#### NC/GA End-Dump Market Intel")
+    render_section_header("NC/GA End-Dump Market Intel", icon="📈")
     if st.button("Refresh BulkLoads Intel", use_container_width=True):
         st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
         added, updated, errors = 0, 0, 0
@@ -2052,14 +2142,20 @@ def render_load_board_tab() -> None:
             f"_{item['notes']}_"
         )
 
-    st.markdown("#### Saved Opportunities")
+    render_section_header("Saved Opportunities", icon="💼")
     try:
         with closing(get_connection()) as conn:
             opps_df = fetch_opportunities(conn)
     except Exception:
         opps_df = pd.DataFrame()
     if opps_df.empty:
-        st.info("No opportunities yet — refresh intel or log one above.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📦",
+            "No opportunities yet",
+            "Refresh intel or log an opportunity above to get started.",
+        )
     else:
         show = [c for c in ["lane", "commodity", "rate", "contact", "source", "created_at"] if c in opps_df.columns]
         st.dataframe(opps_df[show], use_container_width=True, hide_index=True)
@@ -2455,7 +2551,7 @@ def render_alerts_tab() -> None:
                     st.error(str(exc))
 
     st.divider()
-    st.markdown("#### Alert Log")
+    render_section_header("Alert Log", icon="📋")
     try:
         with closing(get_connection()) as conn:
             sms_df = pd.read_sql_query(
@@ -2469,7 +2565,9 @@ def render_alerts_tab() -> None:
                 conn,
             )
         if sms_df.empty:
-            st.caption("No messages logged yet.")
+            from lp_helpers.ui_components import render_empty_state
+
+            render_empty_state("💬", "No messages logged yet.")
         else:
             st.dataframe(sms_df, use_container_width=True, hide_index=True)
     except sqlite3.Error:
@@ -2482,7 +2580,13 @@ def render_bol_generator_tab() -> None:
 
     loads_df = fetch_loads()
     if loads_df.empty:
-        st.info("No loads logged yet. Log a load in **Logger** first.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📄",
+            "No loads logged yet",
+            "Log a load in the Logger tab first, then generate a BOL here.",
+        )
         return
 
     options = {
@@ -2505,24 +2609,29 @@ def render_bol_generator_tab() -> None:
     pdf_name = bol_pdf_filename(load)
 
     if st.button("Generate PDF BOL", type="primary", use_container_width=True):
-        try:
-            pdf_bytes = generate_bol_pdf(load)
-            st.session_state["bol_pdf_bytes"] = pdf_bytes
-            st.session_state["bol_pdf_name"] = pdf_name
-            ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
-            out_path = ATTACHMENTS_DIR / pdf_name
-            out_path.write_bytes(pdf_bytes)
-            bol_msg = format_sms("bol_ready", load)
-            log_sms_event(None, "bol_ready", bol_msg, "generated")
-            st.success(f"BOL generated — saved to attachments/{pdf_name}")
-            if st.session_state.get("sms_auto_send") == "1":
-                st.info("BOL ready notification logged. Enable Twilio to auto-send.")
-        except OSError as exc:
-            log.exception("BOL file write failed")
-            st.error(f"Could not save BOL file: {exc}")
-        except Exception as exc:
-            log.exception("BOL generation failed")
-            st.error(f"BOL generation failed: {exc}")
+        bol_errors = validate_bol_load(load)
+        if bol_errors:
+            for err in bol_errors:
+                st.error(err)
+        else:
+            try:
+                pdf_bytes = generate_bol_pdf(load)
+                st.session_state["bol_pdf_bytes"] = pdf_bytes
+                st.session_state["bol_pdf_name"] = pdf_name
+                ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+                out_path = ATTACHMENTS_DIR / pdf_name
+                out_path.write_bytes(pdf_bytes)
+                bol_msg = format_sms("bol_ready", load)
+                log_sms_event(None, "bol_ready", bol_msg, "generated")
+                st.success(f"BOL generated — saved to attachments/{pdf_name}")
+                if st.session_state.get("sms_auto_send") == "1":
+                    st.info("BOL ready notification logged. Enable Twilio to auto-send.")
+            except OSError as exc:
+                log.exception("BOL file write failed")
+                st.error(f"Could not save BOL file: {exc}")
+            except Exception as exc:
+                log.exception("BOL generation failed")
+                st.error(f"BOL generation failed: {exc}")
 
     if (
         st.session_state.get("bol_pdf_bytes")
@@ -2555,6 +2664,8 @@ def _exit_driver_view() -> None:
 
 
 def main() -> None:
+    auto_backup_db()
+
     st.set_page_config(
         page_title=PAGE_TITLE,
         page_icon="🚛",
@@ -2584,25 +2695,21 @@ def main() -> None:
     night_mode = False
     try:
         from lp_helpers.database import init_db
-        from lp_helpers.ui_components import inject_road_css, is_night_mode, render_day_night_toggle
+        from lp_helpers.ui_components import inject_road_css, is_night_mode, render_day_night_toggle, render_sidebar_brand, render_section_header
 
         init_db()
         night_mode = is_night_mode()
         with st.sidebar:
-            st.markdown('<div class="nav-group-label">Mission Control</div>', unsafe_allow_html=True)
-            st.markdown(f"**{CARRIER_NAME}**")
-            st.write("**Spruce Pine NC → Central GA**")
-            st.write(f"**{TRAILER_DESC}**")
+            render_sidebar_brand(
+                carrier=CARRIER_NAME,
+                lane_origin=TARGET_LANE_ORIGIN,
+                lane_dest=TARGET_LANE_DESTINATION,
+                trailer=TRAILER_DESC,
+            )
             render_lawson_sidebar_extras()
             st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
             render_day_night_toggle()
-            if BIG_E_MODE:
-                st.markdown(
-                    '<span style="background:#422006;color:#fdba74;padding:0.2rem 0.6rem;'
-                    'border-radius:12px;font-size:0.75rem;font-weight:700;">BIG E MODE</span>',
-                    unsafe_allow_html=True,
-                )
-            if st.button("📱 Driver App", use_container_width=True):
+            if st.button("🚛 Driver View", use_container_width=True):
                 st.session_state.view_mode = "driver"
                 st.rerun()
             st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")

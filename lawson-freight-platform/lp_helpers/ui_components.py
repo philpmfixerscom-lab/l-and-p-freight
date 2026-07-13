@@ -24,10 +24,7 @@ from lp_helpers.database import (
 from lp_helpers.engines import resolve_voice_path
 from lp_helpers.ui_theme import NAV_MORE, NAV_PRIMARY, inject_ui_css
 
-try:
-    from lp_helpers.lawson_profile import TAGLINE as APP_SUBTITLE
-except ImportError:
-    APP_SUBTITLE = "Spruce Pine NC → Central GA · Phillip & Lawson"
+APP_SUBTITLE = "Spruce Pine NC → Central GA · Phillip & Lawson"
 AI_DISCLAIMER = (
     "Transparent rule-based suggestions only. Not legal, financial, insurance, "
     "safety, or maintenance advice. Phillip / Lawson makes every final decision."
@@ -427,7 +424,7 @@ def render_live_map_simulation(progress_pct: float = 35.0) -> None:
             <div class="lf-map-dot truck" style="left:{truck_left}%;"></div>
             <div class="lf-map-label" style="left:6%;top:62%;">Spruce Pine NC</div>
             <div class="lf-map-label" style="right:4%;top:62%;">Central GA</div>
-            <div style="position:absolute;bottom:0.65rem;left:1rem;font-size:0.75rem;color:#64748b;">
+            <div style="position:absolute;bottom:0.65rem;left:1rem;font-size:0.75rem;color:var(--lf-muted);">
                 Live lane simulation · {PRIMARY_LANE['loaded_miles']} mi primary ·
                 {progress_pct:.0f}% corridor
             </div>
@@ -591,3 +588,31 @@ def render_geofence_event_card(row: pd.Series | dict[str, Any]) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_empty_state(icon: str, title: str, body: str = "") -> None:
+    """Consolidated empty / no-data state with icon, title, and optional body."""
+    st.markdown(
+        f"""
+        <div class="lf-empty-state">
+            <span class="lf-empty-state-icon">{icon}</span>
+            <div class="lf-empty-state-title">{title}</div>
+            {f"<div class='lf-empty-state-body'>{body}</div>" if body else ""}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_sidebar_brand(*, carrier: str, lane_origin: str, lane_dest: str, trailer: str) -> None:
+    """Render the branded sidebar header block."""
+    st.markdown('<div class="nav-group-label">Mission Control</div>', unsafe_allow_html=True)
+    st.markdown(f"**{carrier}**")
+    st.markdown(f"**{lane_origin} → {lane_dest}**")
+    st.markdown(f"**{trailer}**")
+
+
+def render_section_header(title: str, icon: str = "") -> None:
+    """Consistent section header with optional icon."""
+    display = f"{icon} {title}" if icon else title
+    st.markdown(f'<div class="lf-section-header">{display}</div>', unsafe_allow_html=True)

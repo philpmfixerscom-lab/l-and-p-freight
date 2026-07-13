@@ -12,7 +12,7 @@ import streamlit as st
 # Placeholder market intel — refresh button updates timestamp; future: BulkLoads API scrape
 NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Spruce Pine, NC → Macon, GA",
         "commodity": "Feldspar",
         "rate": "$46–52/ton",
@@ -21,7 +21,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "End-dump preferred · 22–24t loads",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Spruce Pine, NC → Augusta, GA",
         "commodity": "Mica",
         "rate": "$48/ton",
@@ -30,7 +30,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "Lined trailer required · weekly volume",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Marion, NC → Central GA",
         "commodity": "Clay",
         "rate": "$44–47/ton",
@@ -39,7 +39,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "Multiple pickups · minimize deadhead on return",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Spruce Pine, NC → Kohler area, GA",
         "commodity": "Spar / Aggregate",
         "rate": "$50/ton",
@@ -48,7 +48,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "Primary L & P lane · 285 loaded mi baseline",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Bakersville, NC → Atlanta, GA",
         "commodity": "Rock",
         "rate": "$42/ton",
@@ -206,9 +206,9 @@ def render_load_board_page(
             f"""
             <div class="lf-panel" style="margin-bottom:0.5rem;padding:0.75rem 1rem;">
                 <strong>{item['commodity']}</strong> · {item['lane']}<br/>
-                <span style="color:#e85d04;font-weight:700;">{item['rate']}</span>
+                <span style="color:var(--lf-orange);font-weight:700;">{item['rate']}</span>
                 · {item['contact']} · Posted {item['posted']}<br/>
-                <span style="font-size:0.85rem;color:#94a3b8;">{item['notes']}</span>
+                <span style="font-size:0.85rem;color:var(--lf-muted);">{item['notes']}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -237,15 +237,15 @@ def render_load_board_page(
                 row = NC_GA_MARKET_INTEL[idx]
                 try:
                     with closing(get_conn()) as conn:
-                        insert_opportunity(
-                            conn,
-                            lane=row["lane"],
-                            commodity=row["commodity"],
-                            rate=row["rate"],
-                            contact=row["contact"],
-                            notes=row.get("notes", ""),
-                            source="bulkloads_placeholder",
-                        )
+                            insert_opportunity(
+                                conn,
+                                lane=row["lane"],
+                                commodity=row["commodity"],
+                                rate=row["rate"],
+                                contact=row["contact"],
+                                notes=row.get("notes", ""),
+                                source="BulkLoads",
+                            )
                         conn.commit()
                     clear_cache()
                     st.success("Listing saved to opportunities.")

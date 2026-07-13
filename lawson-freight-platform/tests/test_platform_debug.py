@@ -24,7 +24,7 @@ def test_lawson_profile_imports():
     assert BIG_E_MODE is True
     assert len(LAWSON_SEED_LEADS) >= 4
     assert len(LAWSON_SIM_ROUTE) >= 2
-    assert "BIG E" in PLATFORM_TITLE
+    assert "Lawson Freight" in PLATFORM_TITLE
 
 
 def test_database_init_and_schema(tmp_path, monkeypatch):

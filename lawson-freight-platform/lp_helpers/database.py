@@ -15,7 +15,6 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from lp_helpers.lawson_profile import LAWSON_SEED_LEADS
 from lp_helpers.load_board import ensure_opportunities_table
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -58,7 +57,44 @@ COMMODITY_OPTIONS: list[str] = [
     "Other",
 ]
 
-SEED_LEADS: list[dict[str, Any]] = LAWSON_SEED_LEADS
+SEED_LEADS: list[dict[str, Any]] = [
+    {
+        "company": "Sibelco",
+        "contact_name": "Dispatch",
+        "phone": "828-592-2780",
+        "commodity_focus": "Feldspar, Mica",
+        "lane_notes": "Spruce Pine quarry — priority shipper",
+        "status": "Hot",
+        "priority": 1,
+    },
+    {
+        "company": "Covia",
+        "contact_name": "Dispatch",
+        "phone": "1-800-243-9004",
+        "commodity_focus": "Feldspar, Clay",
+        "lane_notes": "National miner — NC/GA lanes",
+        "status": "Hot",
+        "priority": 2,
+    },
+    {
+        "company": "K-T Feldspar",
+        "contact_name": "Dispatch",
+        "phone": "828-765-9621",
+        "commodity_focus": "Feldspar",
+        "lane_notes": "Local Spruce Pine shipper",
+        "status": "Hot",
+        "priority": 3,
+    },
+    {
+        "company": "Trimac",
+        "contact_name": "Dispatch",
+        "phone": "828-765-7491",
+        "commodity_focus": "Bulk / brokered",
+        "lane_notes": "Broker / carrier partner",
+        "status": "Hot",
+        "priority": 4,
+    },
+]
 
 SEED_COMPLIANCE: list[tuple[str, str, str | None, str]] = [
     ("USDOT / MC authority — L & P", "Verify", "2027-06-30", "Confirm interstate authority before hauling."),
@@ -981,24 +1017,19 @@ def init_db() -> None:
         if "voice_audio_path" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN voice_audio_path TEXT")
 
-        lead_cols = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
-        if "email" not in lead_cols:
-            conn.execute("ALTER TABLE leads ADD COLUMN email TEXT")
-
         if conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0] == 0:
             for lead in SEED_LEADS:
                 conn.execute(
                     """
                     INSERT INTO leads (
-                        company, contact_name, phone, email, commodity_focus,
+                        company, contact_name, phone, commodity_focus,
                         lane_notes, status, priority
-                    ) VALUES (?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?)
                     """,
                     (
                         lead["company"],
                         lead["contact_name"],
-                        lead.get("phone", ""),
-                        lead.get("email", ""),
+                        lead["phone"],
                         lead["commodity_focus"],
                         lead["lane_notes"],
                         lead["status"],

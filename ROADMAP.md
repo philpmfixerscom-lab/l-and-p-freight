@@ -33,13 +33,13 @@ graph TB
 
 - [x] `eld_integration.py` — `ELDClient` facade with `StubEldProvider`
 - [x] `eld_api_stubs.py` — `SamsaraProvider`, `MotiveProvider`, `GeotabProvider` (raise `NotImplementedError` until credentials)
-- [x] `eld_mobile/index.html` — driver-cab web view (speed, ETA, HOS, current BOL)
+- [x] `eld_mobile/index.html` — owner-cab web view (speed, ETA, HOS, current BOL)
 - [x] `ingest_eld_miles(load_id, actual_loaded, actual_empty)` — bridges ELD → `routes` table
 - [x] `create_eld_webhook(payload)` — webhook ingress stub
 
 ## Phase 2 — Live Integration (NEXT)
 
-1. **Choose vendor** (Samsara recommended for small fleets; Motive strongest driver-app UX)
+1. **Choose vendor** (Samsara recommended for small fleets; Motive strongest in-cab UX)
 2. Provision API token + install vehicle gateway / dash cam
 3. Implement `SamsaraProvider` methods against real REST endpoints
 4. Add webhook route (`POST /webhooks/eld`) in deployment config (Cloudflare tunnel / Flask wrapper)
@@ -53,11 +53,11 @@ graph TB
 - [ ] Map HOS `DriverHos` fields to Samsara/Motive duty-status schema
 - [ ] Add webhook signature verification (`X-Samsara-Signature` / Motive HMAC)
 
-## Phase 3 — Driver App
+## Phase 3 — Operations App
 
 - [ ] Convert `eld_mobile/index.html` to PWA (service worker + offline cache)
 - [ ] Add React Native or Flutter wrapper if native app is required
-- [ ] Push dispatch via `ELDClient.push_dispatch` from **Billing & Driver Pay** tab
+- [ ] Push dispatch via `ELDClient.push_dispatch` from **Billing & Operator Pay** tab
 - [ ] BOL acceptance flow → `ELDClient.ack_bill_of_lading` → webhook → `settlements`
 - [ ] HOS alerts when `drive_remaining_hours < 2.0`
 
