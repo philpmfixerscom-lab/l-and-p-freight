@@ -759,7 +759,7 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
                 font-weight: 800 !important;
             }
 
-            /* Form Fields - High Visibility (Prefilled text boxes) */
+            /* === FIX: High visibility text in form fields (Night Mode) === */
             .stTextInput input,
             .stTextArea textarea,
             .stNumberInput input,
@@ -771,9 +771,38 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
                 border: 2px solid #475569 !important;
                 font-size: 1.05rem !important;
                 border-radius: 8px !important;
+                -webkit-text-fill-color: #f1f5f9 !important;
+                caret-color: #e0e7ff !important;
             }
 
-            /* Fix for selectbox / commodity / prefilled field text in night mode */
+            /* Make sure prefilled values stand out strongly */
+            .stTextInput input,
+            .stTextArea textarea,
+            .stTextInput input:not(:placeholder-shown),
+            .stTextArea textarea:not(:placeholder-shown),
+            .stNumberInput input:not(:placeholder-shown) {
+                color: #e0e7ff !important;
+                -webkit-text-fill-color: #e0e7ff !important;
+                caret-color: #e0e7ff !important;
+            }
+
+            /* Placeholder text should be visible but not overpowering */
+            .stTextInput input::placeholder,
+            .stTextArea textarea::placeholder {
+                color: #64748b !important;
+                -webkit-text-fill-color: #64748b !important;
+                opacity: 1 !important;
+            }
+
+            /* Focus state for better UX */
+            .stTextInput input:focus,
+            .stTextArea textarea:focus,
+            .stNumberInput input:focus {
+                border-color: #60a5fa !important;
+                box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.3) !important;
+            }
+
+            /* Selectbox / commodity / dropdown menus */
             .stSelectbox > div > div,
             .stSelectbox span,
             .stSelectbox div[data-baseweb="select"],
@@ -788,6 +817,7 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
             [data-baseweb="select"] span {
                 color: #f1f5f9 !important;
                 background-color: #1e2937 !important;
+                -webkit-text-fill-color: #f1f5f9 !important;
             }
             .stSelectbox label,
             .stMultiSelect label,
@@ -796,26 +826,6 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
             .stTextArea label,
             label {
                 color: #f1f5f9 !important;
-            }
-            /* Prefilled values (not only placeholders) */
-            .stTextInput input:not(:placeholder-shown),
-            .stTextArea textarea:not(:placeholder-shown),
-            .stNumberInput input:not(:placeholder-shown) {
-                color: #f1f5f9 !important;
-                -webkit-text-fill-color: #f1f5f9 !important;
-                caret-color: #f1f5f9 !important;
-            }
-
-            .stTextInput input::placeholder,
-            .stTextArea textarea::placeholder {
-                color: #64748b !important;
-            }
-
-            .stTextInput input:focus,
-            .stTextArea textarea:focus,
-            .stNumberInput input:focus {
-                border-color: #60a5fa !important;
-                box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25) !important;
             }
 
             /* Buttons */
