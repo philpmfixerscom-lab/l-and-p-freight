@@ -22,7 +22,7 @@ from lp_helpers.database import (
     set_setting,
 )
 from lp_helpers.engines import resolve_voice_path
-from lp_helpers.ui_theme import NAV_MORE, NAV_PRIMARY, inject_ui_css
+from lp_helpers.ui_theme import NAV_MORE, NAV_PRIMARY, apply_platform_theme, inject_ui_css
 
 APP_SUBTITLE = "Spruce Pine NC → Central GA · Phillip & Lawson"
 AI_DISCLAIMER = (
@@ -49,24 +49,30 @@ _ZONE_CSS = {
 
 
 def is_night_mode() -> bool:
-    return get_setting(NIGHT_MODE_KEY, "0") == "1"
+    """Session-first night flag with DB persistence (default: night for cab use)."""
+    if "night_mode" not in st.session_state:
+        st.session_state.night_mode = get_setting(NIGHT_MODE_KEY, "1") == "1"
+    return bool(st.session_state.night_mode)
 
 
-def render_day_night_toggle(*, key: str = "day_night_toggle") -> None:
-    """Day / Night segmented control — persists theme and reruns on change."""
-    options = ("☀️ Day", "🌙 Night")
-    choice = st.radio(
-        "Display mode",
-        options,
-        index=1 if is_night_mode() else 0,
-        horizontal=True,
+def render_day_night_toggle(*, key: str = "night_mode_toggle_v2") -> None:
+    """Reliable Day/Night toggle with forced theme application + DB persist."""
+    if "night_mode" not in st.session_state:
+        st.session_state.night_mode = get_setting(NIGHT_MODE_KEY, "1") == "1"
+
+    current = st.sidebar.toggle(
+        "Night Mode" if st.session_state.night_mode else "Day Mode",
+        value=st.session_state.night_mode,
         key=key,
-        label_visibility="collapsed",
     )
-    want_night = choice == options[1]
-    if want_night != is_night_mode():
-        set_setting(NIGHT_MODE_KEY, "1" if want_night else "0")
+
+    if current != st.session_state.night_mode:
+        st.session_state.night_mode = current
+        set_setting(NIGHT_MODE_KEY, "1" if current else "0")
         st.rerun()
+
+    # Theme applied here and again at end of main() so every widget stays high-contrast
+    apply_platform_theme(bool(st.session_state.night_mode))
 
 
 def inject_road_css(night_mode: bool | None = None) -> None:

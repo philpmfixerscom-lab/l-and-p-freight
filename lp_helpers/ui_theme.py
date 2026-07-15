@@ -50,11 +50,11 @@ def inject_ui_css(night_mode: bool = False) -> None:
         """
     else:
         vars_css = """
-            --lf-bg: #d4dce8;
-            --lf-card: #e8edf4;
-            --lf-text: #1e293b;
+            --lf-bg: #f8fafc;
+            --lf-card: #ffffff;
+            --lf-text: #0f172a;
             --lf-muted: #475569;
-            --lf-border: #b8c5d6;
+            --lf-border: #cbd5e1;
             --lf-navy: #0b1628;
             --lf-orange: #e85d04;
             --lf-orange-hover: #c2410c;
@@ -62,7 +62,7 @@ def inject_ui_css(night_mode: bool = False) -> None:
             --lf-green: #15803d;
             --lf-amber: #d97706;
             --lf-red: #dc2626;
-            --lf-sidebar: #0b1628;
+            --lf-sidebar: #e2e8f0;
             --lf-shadow: rgba(15, 23, 42, 0.12);
         """
 
@@ -703,3 +703,188 @@ def inject_ui_css(night_mode: bool = False) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def apply_platform_theme(night_mode: bool | None = None) -> None:
+    """High-contrast theme for Day and Night — high pop, readable text, consistent buttons."""
+    if night_mode is None:
+        if "night_mode" not in st.session_state:
+            st.session_state.night_mode = True
+        night = bool(st.session_state.night_mode)
+    else:
+        night = bool(night_mode)
+        st.session_state.night_mode = night
+
+    if night:
+        st.markdown(
+            """
+            <style>
+            html, body, .stApp, [data-testid="stAppViewContainer"],
+            [data-testid="stHeader"], .main, .block-container {
+                background-color: #0b1120 !important;
+                color: #f1f5f9 !important;
+            }
+            section[data-testid="stSidebar"],
+            section[data-testid="stSidebar"] > div,
+            [data-testid="stSidebarContent"] {
+                background-color: #1e2937 !important;
+            }
+            section[data-testid="stSidebar"] *,
+            section[data-testid="stSidebar"] label,
+            section[data-testid="stSidebar"] p,
+            section[data-testid="stSidebar"] span {
+                color: #f1f5f9 !important;
+            }
+            div[data-testid="stMetric"] {
+                background-color: #1e2937 !important;
+                border: 2px solid #475569 !important;
+                border-radius: 12px !important;
+                padding: 0.65rem 0.85rem !important;
+                color: #f1f5f9 !important;
+            }
+            div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 600 !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+                color: #f8fafc !important; font-weight: 800 !important;
+            }
+            .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
+                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                border: 2px solid #60a5fa !important;
+                border-radius: 10px !important;
+            }
+            .stButton > button:hover, .stDownloadButton > button:hover {
+                filter: brightness(1.12) !important;
+                border-color: #93c5fd !important;
+            }
+            .stTabs [aria-selected="true"],
+            div[role="radiogroup"] label[data-checked="true"],
+            div[role="radiogroup"] label:has(input:checked) {
+                color: #bae6fd !important;
+                border-bottom: 4px solid #bae6fd !important;
+                font-weight: 700 !important;
+            }
+            h1, h2, h3, h4, h5, .stMarkdown, .stMarkdown p, .stCaption, label, span, p {
+                color: #f1f5f9 !important;
+            }
+            .stCaption, [data-testid="stCaptionContainer"] { color: #94a3b8 !important; }
+            .stTextInput input, .stNumberInput input, .stTextArea textarea,
+            .stSelectbox > div > div, .stMultiSelect > div > div,
+            [data-baseweb="select"] > div {
+                background-color: #1e2937 !important;
+                color: #f1f5f9 !important;
+                border-color: #475569 !important;
+            }
+            .stDataFrame, [data-testid="stDataFrame"] {
+                background-color: #1e2937 !important;
+                color: #f1f5f9 !important;
+                border: 1px solid #475569 !important;
+                border-radius: 10px !important;
+            }
+            .stExpander, [data-testid="stExpander"] {
+                background-color: #1e2937 !important;
+                border: 1px solid #475569 !important;
+                border-radius: 10px !important;
+            }
+            hr { border-color: #334155 !important; }
+            /* Controlled main nav radio pills */
+            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label {
+                background: #1e2937 !important;
+                border: 1px solid #475569 !important;
+                border-radius: 999px !important;
+                padding: 0.35rem 0.85rem !important;
+                color: #e2e8f0 !important;
+                font-weight: 600 !important;
+            }
+            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:has(input:checked) {
+                background: #1e40af !important;
+                border-color: #60a5fa !important;
+                color: #ffffff !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <style>
+            html, body, .stApp, [data-testid="stAppViewContainer"],
+            [data-testid="stHeader"], .main, .block-container {
+                background-color: #f8fafc !important;
+                color: #0f172a !important;
+            }
+            section[data-testid="stSidebar"],
+            section[data-testid="stSidebar"] > div,
+            [data-testid="stSidebarContent"] {
+                background-color: #e2e8f0 !important;
+            }
+            section[data-testid="stSidebar"] *,
+            section[data-testid="stSidebar"] label,
+            section[data-testid="stSidebar"] p,
+            section[data-testid="stSidebar"] span {
+                color: #0f172a !important;
+            }
+            div[data-testid="stMetric"] {
+                background-color: #ffffff !important;
+                border: 2px solid #cbd5e1 !important;
+                border-radius: 12px !important;
+                padding: 0.65rem 0.85rem !important;
+                color: #0f172a !important;
+                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+            }
+            div[data-testid="stMetric"] label { color: #475569 !important; font-weight: 600 !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+                color: #0f172a !important; font-weight: 800 !important;
+            }
+            .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
+                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                border: 2px solid #2563eb !important;
+                border-radius: 10px !important;
+            }
+            .stButton > button:hover, .stDownloadButton > button:hover {
+                filter: brightness(1.08) !important;
+            }
+            h1, h2, h3, h4, h5, .stMarkdown, .stMarkdown p, label, span, p {
+                color: #0f172a !important;
+            }
+            .stCaption, [data-testid="stCaptionContainer"] { color: #475569 !important; }
+            .stTextInput input, .stNumberInput input, .stTextArea textarea,
+            .stSelectbox > div > div, .stMultiSelect > div > div,
+            [data-baseweb="select"] > div {
+                background-color: #ffffff !important;
+                color: #0f172a !important;
+                border-color: #cbd5e1 !important;
+            }
+            .stDataFrame, [data-testid="stDataFrame"] {
+                background-color: #ffffff !important;
+                color: #0f172a !important;
+                border: 1px solid #cbd5e1 !important;
+                border-radius: 10px !important;
+            }
+            .stExpander, [data-testid="stExpander"] {
+                background-color: #ffffff !important;
+                border: 1px solid #cbd5e1 !important;
+                border-radius: 10px !important;
+            }
+            hr { border-color: #cbd5e1 !important; }
+            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label {
+                background: #ffffff !important;
+                border: 1px solid #cbd5e1 !important;
+                border-radius: 999px !important;
+                padding: 0.35rem 0.85rem !important;
+                color: #0f172a !important;
+                font-weight: 600 !important;
+            }
+            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:has(input:checked) {
+                background: #1e40af !important;
+                border-color: #2563eb !important;
+                color: #ffffff !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+

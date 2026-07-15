@@ -29,7 +29,7 @@ foreach ($name in $required) {
     }
 }
 if (Test-Path (Join-Path $root "lawson-freight-platform\app.py")) {
-    Write-Host "  FAIL: nested lawson-freight-platform/ still present — single package tree required" -ForegroundColor Red
+    Write-Host "  FAIL: nested lawson-freight-platform/ still present - single package tree required" -ForegroundColor Red
     exit 1
 }
 Write-Host "  PASS: package sources" -ForegroundColor Green
@@ -50,7 +50,7 @@ try {
         throw "status $($h.StatusCode)"
     }
 } catch {
-    Write-Host "  FAIL: dispatch not running on port $appPort — run .\run-fleet.ps1" -ForegroundColor Red
+    Write-Host "  FAIL: dispatch not running on port $appPort - run .\run-fleet.ps1" -ForegroundColor Red
     exit 1
 }
 
@@ -60,7 +60,7 @@ try {
     if ($site.Content -notmatch 'L\s*&\s*P') { throw "website content mismatch" }
     Write-Host "  PASS: marketing website" -ForegroundColor Green
 } catch {
-    Write-Host "  FAIL: website not running on port $webPort — run .\run-fleet.ps1" -ForegroundColor Red
+    Write-Host "  FAIL: website not running on port $webPort - run .\run-fleet.ps1" -ForegroundColor Red
     exit 1
 }
 
@@ -70,7 +70,7 @@ try {
         Write-Host "  PASS: driver app entry" -ForegroundColor Green
     }
 } catch {
-    Write-Host "  FAIL: driver entry not reachable — $($_)" -ForegroundColor Red
+    Write-Host "  FAIL: driver entry not reachable - $($_)" -ForegroundColor Red
     exit 1
 }
 

@@ -1,20 +1,34 @@
 (function () {
-  let appUrl = (document.body.dataset.appUrl || "/app/").replace(/\/?$/, "/");
+  // Local fleet: static site on :8080, Streamlit dispatch on :8502.
+  // Always use absolute dispatch URLs on localhost so links never 404 as /app/.
   const host = window.location.hostname;
-  if ((host === "127.0.0.1" || host === "localhost") && window.location.port !== "8502") {
+  const isLocal = host === "127.0.0.1" || host === "localhost";
+  let appUrl = (document.body.dataset.appUrl || "http://127.0.0.1:8502/").replace(/\/?$/, "/");
+
+  if (isLocal) {
     appUrl = `http://${host}:8502/`;
+  } else if (appUrl.indexOf("/app") === -1 && window.location.port !== "8502") {
+    // production-style path when not on Streamlit port
+    appUrl = appUrl.replace(/\/?$/, "/") ;
   }
-  const driverUrl = appUrl + "?view=driver";
+
+  const driverUrl = appUrl.includes("view=driver")
+    ? appUrl
+    : appUrl + (appUrl.indexOf("?") >= 0 ? "&" : "?") + "view=driver";
 
   document.body.dataset.appUrl = appUrl;
   document.body.dataset.driverUrl = driverUrl;
 
   document.querySelectorAll("[data-app-link]").forEach((el) => {
     el.setAttribute("href", appUrl);
+    el.setAttribute("target", "_blank");
+    el.setAttribute("rel", "noopener");
   });
 
   document.querySelectorAll("[data-driver-link]").forEach((el) => {
     el.setAttribute("href", driverUrl);
+    el.setAttribute("target", "_blank");
+    el.setAttribute("rel", "noopener");
   });
 
   if ("serviceWorker" in navigator) {

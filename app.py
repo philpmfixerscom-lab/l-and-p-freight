@@ -1246,14 +1246,38 @@ def match_lane_rates(
 
 
 def navigate_to_tab(tab_name: str) -> None:
+    """Switch main view via session state (works with controlled nav, not st.tabs)."""
     if tab_name == "Rates":
         st.session_state.open_rates_expander = True
         tab_name = "Dashboard"
-    if tab_name in TAB_KEYS:
-        st.session_state.active_tab = tab_name
-        label = TAB_LABELS[TAB_KEYS.index(tab_name)]
-        st.session_state.nav_hint = f"👉 **{label}** tab"
+    if tab_name not in TAB_KEYS:
+        return
+    st.session_state.active_tab = tab_name
+    # Keep radio widget in sync when present
+    st.session_state["main_nav_radio"] = tab_name
+    label = TAB_LABELS[TAB_KEYS.index(tab_name)]
+    st.session_state.nav_hint = f"Opened **{label}**"
     st.rerun()
+
+
+def render_main_nav() -> str:
+    """Horizontal controlled navigation — Quick Actions can set active_tab reliably."""
+    if "active_tab" not in st.session_state or st.session_state.active_tab not in TAB_KEYS:
+        st.session_state.active_tab = "Dashboard"
+    if "main_nav_radio" not in st.session_state or st.session_state.main_nav_radio not in TAB_KEYS:
+        st.session_state.main_nav_radio = st.session_state.active_tab
+
+    choice = st.radio(
+        "Main navigation",
+        options=TAB_KEYS,
+        format_func=lambda key: TAB_LABELS[TAB_KEYS.index(key)],
+        horizontal=True,
+        key="main_nav_radio",
+        label_visibility="collapsed",
+    )
+    if choice != st.session_state.active_tab:
+        st.session_state.active_tab = choice
+    return st.session_state.active_tab
 
 
 def _persist_owner_role() -> None:
@@ -1285,7 +1309,7 @@ def render_sidebar() -> None:
         render_lawson_sidebar_extras()
         st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
         render_day_night_toggle()
-        if st.button("🚛 Driver View (Beta)", use_container_width=True):
+        if st.button("Driver View (Beta)", use_container_width=True, key="driver_view_btn_fallback"):
             st.session_state.view_mode = "driver"
             st.rerun()
         st.caption(TAGLINE)
@@ -1357,14 +1381,14 @@ def render_dashboard_tab() -> None:
 
     st.markdown("#### Quick Actions")
     action1, action2, action3, action4 = st.columns(4)
-    if action1.button("Log New Call / Update Lead", use_container_width=True):
+    if action1.button("Log New Call / Update Lead", use_container_width=True, key="qa_leads"):
         navigate_to_tab("Leads")
-    if action2.button("Log Potential Load", use_container_width=True):
+    if action2.button("Log Potential Load", use_container_width=True, key="qa_logger"):
         navigate_to_tab("Logger")
-    if action3.button("Open Rate Calculator", use_container_width=True):
+    if action3.button("Open Rate Calculator", use_container_width=True, key="qa_rates"):
         st.session_state.open_rates_expander = True
         navigate_to_tab("Dashboard")
-    if action4.button("Generate BOL", use_container_width=True):
+    if action4.button("Generate BOL", use_container_width=True, key="qa_bol"):
         navigate_to_tab("BOL")
 
     st.divider()
@@ -2687,17 +2711,28 @@ def _exit_driver_view() -> None:
 
 
 def safe_render_driver_view() -> None:
-    """Safe wrapper — full cabin UI when healthy; recovery UI if helper import/runtime fails."""
+    """Crash-proof Driver View — signature-tolerant, never takes down Dispatch."""
     try:
         from lp_helpers.driver_mobile import render_driver_app
 
         def _traccar_status_for_driver() -> dict[str, Any] | None:
-            url, token, email, password = _traccar_connection_params()
-            status, fleet, _devices = _cached_traccar_fleet(url, token, email, password)
-            if status.get("ok"):
-                return get_traccar_live().get_live_status(None)
+            try:
+                url, token, email, password = _traccar_connection_params()
+                status, _fleet, _devices = _cached_traccar_fleet(url, token, email, password)
+                if status.get("ok"):
+                    return get_traccar_live().get_live_status(None)
+            except Exception:
+                return None
             return None
 
+        def _on_exit() -> None:
+            st.session_state.view_mode = "dispatch"
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
+
+        # Pass full kwargs; render_driver_app accepts optional GPS + ignores extras
         render_driver_app(
             get_connection=get_connection,
             get_active_owner=get_active_owner,
@@ -2706,15 +2741,78 @@ def safe_render_driver_view() -> None:
             format_sms=format_sms,
             log_sms_event=log_sms_event,
             on_emergency=dispatch_emergency,
-            on_exit=_exit_driver_view,
+            on_exit=_on_exit,
         )
-    except Exception as exc:
+    except Exception as e:
         st.error("Driver View is temporarily unavailable.")
-        st.caption("Switch back to Dispatch view for now. Helper detail (for support):")
-        st.code(f"{type(exc).__name__}: {exc}")
-        if st.button("Return to Dispatch View", type="primary"):
-            _exit_driver_view()
+        st.caption(f"Error: {str(e)[:120]}")
+        if st.button("Return to Dispatch View", use_container_width=True, key="driver_return_safe"):
+            st.session_state.view_mode = "dispatch"
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
             st.rerun()
+
+
+def apply_platform_theme(night_mode: bool | None = None) -> None:
+    """High-contrast Day/Night theme — single entry used across the platform."""
+    try:
+        from lp_helpers.ui_theme import apply_platform_theme as _apply
+
+        _apply(night_mode)
+        return
+    except Exception:
+        pass
+
+    # Fallback if helper package unavailable
+    if night_mode is None:
+        if "night_mode" not in st.session_state:
+            st.session_state.night_mode = True
+        night = bool(st.session_state.night_mode)
+    else:
+        night = bool(night_mode)
+        st.session_state.night_mode = night
+
+    if night:
+        st.markdown(
+            """
+            <style>
+            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; }
+            section[data-testid="stSidebar"] { background-color: #1e2937 !important; }
+            div[data-testid="stMetric"] {
+                background-color: #1e2937 !important; border: 2px solid #475569 !important;
+                color: #f1f5f9 !important;
+            }
+            .stButton>button, .stDownloadButton>button {
+                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: white !important; font-weight: 700 !important;
+                border: 2px solid #60a5fa !important;
+            }
+            h1, h2, h3, h4, h5, p, label, span { color: #f1f5f9 !important; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <style>
+            .stApp { background-color: #f8fafc !important; color: #0f172a !important; }
+            section[data-testid="stSidebar"] { background-color: #e2e8f0 !important; }
+            div[data-testid="stMetric"] {
+                background-color: white !important; border: 2px solid #cbd5e1 !important;
+                color: #0f172a !important;
+            }
+            .stButton>button, .stDownloadButton>button {
+                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: white !important; font-weight: 700 !important;
+            }
+            h1, h2, h3, h4, h5, p, label, span { color: #0f172a !important; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_sidebar_brand(
@@ -2723,43 +2821,30 @@ def render_sidebar_brand(
     lane_dest: str = "Central Georgia (Kohler area)",
     trailer: str = "39ft Frameless End-Dump",
 ) -> None:
-    """Safe fallback sidebar brand header — prevents NameError after merges/updates."""
+    """Safe fallback sidebar brand header."""
     try:
-        st.sidebar.markdown(f"### 🚛 {carrier}")
-        st.sidebar.caption(f"{lane_origin} → {lane_dest} · {trailer} · Phillip & Lawson")
+        st.sidebar.markdown(f"### {carrier}")
+        st.sidebar.caption(f"{lane_origin} -> {lane_dest} · {trailer} · Phillip & Lawson")
         st.sidebar.caption("Owner-Operator Command Center | Spruce Pine Strong")
     except Exception:
         pass
 
 
 def render_day_night_toggle():
-    """Working day/night toggle with visual effect."""
+    """Fallback Day/Night toggle when ui_components is unavailable."""
     if "night_mode" not in st.session_state:
         st.session_state.night_mode = True
 
-    toggle = st.sidebar.toggle(
-        "🌙 Night Mode (High Contrast)",
+    current = st.sidebar.toggle(
+        "Night Mode" if st.session_state.night_mode else "Day Mode",
         value=st.session_state.night_mode,
-        key="night_mode_toggle"
+        key="night_mode_toggle_v2_fallback",
     )
-
-    if toggle != st.session_state.night_mode:
-        st.session_state.night_mode = toggle
+    if current != st.session_state.night_mode:
+        st.session_state.night_mode = current
         st.rerun()
+    apply_platform_theme(bool(st.session_state.night_mode))
 
-    # Apply dark mode CSS when enabled
-    if st.session_state.night_mode:
-        st.markdown(
-            """
-            <style>
-            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; }
-            .stSidebar { background-color: #1e2937 !important; }
-            div[data-testid="stMetric"] { background-color: #1e2937 !important; border: 1px solid #475569; }
-            .stButton>button { background-color: #1e40af !important; color: white !important; }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
 
 def main() -> None:
     auto_backup_db()
@@ -2770,7 +2855,25 @@ def main() -> None:
         layout="wide",
     )
 
+    # Theme ASAP so first paint is high-contrast (refined again after toggle)
+    if "night_mode" not in st.session_state:
+        st.session_state.night_mode = True
+    apply_platform_theme(bool(st.session_state.night_mode))
+
     load_persistent_filters()
+
+    # === DRIVER VIEW EARLY EXIT (before dispatch chrome) ===
+    if _driver_view_requested():
+        try:
+            from lp_helpers.database import init_db
+
+            init_db()
+        except Exception:
+            init_database()
+        else:
+            init_database()
+        safe_render_driver_view()
+        st.stop()
 
     try:
         from lp_helpers.mobile_web import (
@@ -2790,13 +2893,18 @@ def main() -> None:
     if st.session_state.active_tab not in TAB_KEYS:
         st.session_state.active_tab = "Dashboard"
 
-    night_mode = False
+    night_mode = bool(st.session_state.get("night_mode", True))
     try:
         from lp_helpers.database import init_db
-        from lp_helpers.ui_components import inject_road_css, is_night_mode, render_day_night_toggle, render_sidebar_brand, render_section_header
+        from lp_helpers.ui_components import (
+            inject_road_css,
+            is_night_mode,
+            render_day_night_toggle,
+            render_sidebar_brand,
+            render_section_header,
+        )
 
         init_db()
-        night_mode = is_night_mode()
         with st.sidebar:
             render_sidebar_brand(
                 carrier=CARRIER_NAME,
@@ -2807,11 +2915,12 @@ def main() -> None:
             render_lawson_sidebar_extras()
             st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
             render_day_night_toggle()
-            if st.button("🚛 Driver View (Beta)", use_container_width=True):
+            if st.button("Driver View (Beta)", use_container_width=True, key="driver_view_btn"):
                 st.session_state.view_mode = "driver"
                 st.rerun()
             st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")
-        inject_road_css()
+        night_mode = is_night_mode()
+        inject_road_css(night_mode)
         if night_mode:
             inject_elite_dark_css()
     except ImportError:
@@ -2820,9 +2929,8 @@ def main() -> None:
     else:
         init_database()
 
-    if _driver_view_requested():
-        safe_render_driver_view()
-        return
+    # Final theme pass — wins over inject_road_css for text pop + contrast
+    apply_platform_theme(night_mode)
 
     st.title(f"🚛 {PLATFORM_TITLE}")
     st.caption(f"{TAGLINE} · {TRAILER_DESC} · {APP_VERSION} · `{DB_PATH.name}`")
@@ -2831,32 +2939,27 @@ def main() -> None:
     if nav_hint:
         st.info(nav_hint)
 
-    (
-        tab_dashboard,
-        tab_leads,
-        tab_logger,
-        tab_board,
-        tab_gps,
-        tab_bol,
-        tab_alerts,
-    ) = st.tabs(TAB_LABELS)
+    active = render_main_nav()
 
-    with tab_dashboard:
+    if active == "Dashboard":
         render_dashboard_tab()
-    with tab_leads:
+    elif active == "Leads":
         render_leads_crm_tab()
-    with tab_logger:
+    elif active == "Logger":
         render_load_logger_tab()
-    with tab_board:
+    elif active == "Board":
         render_load_board_tab()
-    with tab_gps:
+    elif active == "GPS":
         render_gps_tracking_tab()
-    with tab_bol:
+    elif active == "BOL":
         render_bol_generator_tab()
-    with tab_alerts:
+    elif active == "Alerts":
         render_alerts_tab()
+    else:
+        render_dashboard_tab()
 
     st.caption(BIG_E_TAGLINE)
+
 
 
 if __name__ == "__main__":

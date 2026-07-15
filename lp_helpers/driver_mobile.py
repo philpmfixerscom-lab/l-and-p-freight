@@ -6,7 +6,6 @@ from contextlib import closing
 from datetime import date
 from typing import Any, Callable
 
-import pandas as pd
 import streamlit as st
 
 CABIN_CSS = """
@@ -55,6 +54,15 @@ def _default_load() -> dict[str, Any]:
     }
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def fetch_active_load(get_connection: Callable[[], Any]) -> dict[str, Any]:
     try:
         with closing(get_connection()) as conn:
@@ -78,22 +86,37 @@ def render_driver_app(
     get_connection: Callable[[], Any],
     get_active_owner: Callable[[], str],
     truck_label: str,
-    get_traccar_fix: Callable[[], dict[str, Any] | None],
-    format_sms: Callable[[str, dict[str, Any]], str],
-    log_sms_event: Callable[..., None],
+    get_traccar_status: Callable[[], dict[str, Any] | None] | None = None,
+    format_sms: Callable[[str, dict[str, Any]], str] | None = None,
+    log_sms_event: Callable[..., None] | None = None,
     on_emergency: Callable[[str, str, dict[str, Any]], tuple[bool, str]] | None = None,
     on_exit: Callable[[], None] | None = None,
+    **_ignored: Any,
 ) -> None:
+    """Cab UI. Extra/missing optional kwargs never TypeError (signature-tolerant)."""
+    if get_traccar_status is None:
+        get_traccar_status = lambda: None  # noqa: E731
+    if format_sms is None:
+
+        def format_sms(_key: str, ctx: dict[str, Any]) -> str:
+            return (
+                f"L & P FREIGHT | {ctx.get('company', 'Dispatch')} | "
+                f"{ctx.get('location', 'Site')}"
+            )
+
+    if log_sms_event is None:
+        log_sms_event = lambda *_a, **_k: None  # noqa: E731
+
     st.markdown(CABIN_CSS, unsafe_allow_html=True)
-    owner = get_active_owner()
+    owner = str(get_active_owner() or "Driver")
     load = fetch_active_load(get_connection)
 
     top1, top2 = st.columns([3, 1])
     with top1:
-        st.markdown(f"## 🚛 L & P Driver")
+        st.markdown("## L & P Driver")
         st.caption(f"{owner} · {truck_label}")
     with top2:
-        if st.button("Exit", use_container_width=True):
+        if st.button("Exit", use_container_width=True, key="driver_exit_btn"):
             if on_exit:
                 on_exit()
             st.rerun()
@@ -111,53 +134,59 @@ def render_driver_app(
     st.markdown("</div>", unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Revenue", f"${float(load.get('total_revenue', 0)):,.0f}")
-    c2.metric("Rate", f"${float(load.get('rate_per_ton', 0)):.2f}/t")
-    c3.metric("Miles", f"{float(load.get('loaded_miles', 285)):.0f} ld")
+    c1.metric("Revenue", f"${_safe_float(load.get('total_revenue')):,.0f}")
+    c2.metric("Rate", f"${_safe_float(load.get('rate_per_ton')):.2f}/t")
+    c3.metric("Miles", f"{_safe_float(load.get('loaded_miles'), 285):.0f} ld")
 
-    fix = get_traccar_fix()
+    try:
+        fix = get_traccar_status()
+    except Exception:
+        fix = None
 
     if on_emergency:
-        from lp_helpers.emergency_alerts import render_emergency_panel
+        try:
+            from lp_helpers.emergency_alerts import render_emergency_panel
 
-        render_emergency_panel(
-            driver=owner,
-            truck_label=truck_label,
-            load=load,
-            gps_fix=fix,
-            on_dispatch=on_emergency,
-            compact=True,
-            key_prefix="driver_em",
-        )
+            render_emergency_panel(
+                driver=owner,
+                truck_label=truck_label,
+                load=load,
+                gps_fix=fix,
+                on_dispatch=on_emergency,
+                compact=True,
+                key_prefix="driver_em",
+            )
+        except Exception as exc:
+            st.warning(f"Emergency panel unavailable: {exc}")
 
-    st.markdown("#### 📍 GPS")
-    if fix:
+    st.markdown("#### GPS")
+    if fix and fix.get("latitude") is not None and fix.get("longitude") is not None:
         g1, g2, g3 = st.columns(3)
-        g1.metric("Lat", f"{fix['latitude']:.4f}")
-        g2.metric("Lon", f"{fix['longitude']:.4f}")
-        g3.metric("Speed", f"{fix['speed_mph']:.0f} mph")
+        g1.metric("Lat", f"{_safe_float(fix.get('latitude')):.4f}")
+        g2.metric("Lon", f"{_safe_float(fix.get('longitude')):.4f}")
+        g3.metric("Speed", f"{_safe_float(fix.get('speed_mph')):.0f} mph")
         st.caption(f"Live Traccar — {fix.get('device_name', 'device')}")
     else:
         st.info("Traccar offline — using Spruce Pine yard coordinates.")
-        st.metric("Lat", "35.9120")
-        st.metric("Lon", "-82.0640")
+        y1, y2 = st.columns(2)
+        y1.metric("Lat", "35.9120")
+        y2.metric("Lon", "-82.0640")
 
     tab_home, tab_update, tab_alert = st.tabs(["Home", "Update", "Alert"])
 
     with tab_home:
-        if st.button("ACK BOL / On Site", type="primary", use_container_width=True):
+        if st.button("ACK BOL / On Site", type="primary", use_container_width=True, key="driver_ack"):
             st.success(f"BOL acknowledged — {owner} on site.")
 
     with tab_update:
         with st.form("driver_status"):
+            choices = ["Booked", "Dispatched", "In Transit", "Delivered"]
             new_status = st.selectbox(
                 "Status",
-                ["Booked", "Dispatched", "In Transit", "Delivered"],
-                index=["Booked", "Dispatched", "In Transit", "Delivered"].index(status)
-                if status in ("Booked", "Dispatched", "In Transit", "Delivered")
-                else 2,
+                choices,
+                index=choices.index(status) if status in choices else 2,
             )
-            notes = st.text_area("Driver notes", placeholder="Scale ticket, gate time, delay…")
+            notes = st.text_area("Driver notes", placeholder="Scale ticket, gate time, delay...")
             if st.form_submit_button("Save Status", use_container_width=True):
                 load_id = load.get("id")
                 if load_id:
@@ -173,7 +202,7 @@ def render_driver_app(
                                 (new_status, extra, load_id),
                             )
                             conn.commit()
-                        st.success(f"Status → {new_status}")
+                        st.success(f"Status -> {new_status}")
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))
@@ -190,6 +219,6 @@ def render_driver_app(
             },
         )
         st.text_area("Arrival SMS", arrival_msg, height=120)
-        if st.button("Log Arrival Alert", use_container_width=True):
+        if st.button("Log Arrival Alert", use_container_width=True, key="driver_arrival_log"):
             log_sms_event(None, "driver_arrival", arrival_msg, "driver_app")
             st.success("Arrival logged — send from dispatch Alerts tab.")

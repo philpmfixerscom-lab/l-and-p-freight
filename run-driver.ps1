@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-# Single package root — Driver View is the same app with ?view=driver.
+# Single package root - Driver View is the same app with ?view=driver.
 $platformRoot = $PSScriptRoot
 $venvPath = Join-Path $platformRoot ".venv"
 $pythonExe = Join-Path $venvPath "Scripts\python.exe"
@@ -12,7 +12,7 @@ if (-not (Test-Path $pythonExe)) {
 }
 
 $driverUrl = "http://127.0.0.1:$appPort/?view=driver"
-Write-Host "Starting L & P Driver App at $driverUrl" -ForegroundColor Green
+Write-Host "Starting L and P Driver App at $driverUrl" -ForegroundColor Green
 Write-Host "Tip: run .\run-fleet.ps1 to start website + dispatch together." -ForegroundColor Gray
 
 & $pythonExe -m streamlit run (Join-Path $platformRoot "app.py") `

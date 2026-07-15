@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>L &amp; P Fleet Hub</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0b1120; color: #f1f5f9; margin: 0; padding: 2rem; }
+    h1 { margin: 0 0 0.5rem; }
+    p { color: #94a3b8; }
+    .grid { display: grid; gap: 1rem; max-width: 520px; margin-top: 1.5rem; }
+    a {
+      display: block; padding: 1.1rem 1.25rem; border-radius: 12px; text-decoration: none;
+      font-weight: 700; font-size: 1.1rem; color: #fff;
+    }
+    .dispatch { background: #1e40af; }
+    .driver { background: #c2410c; }
+    .web { background: #334155; }
+    a:hover { filter: brightness(1.1); }
+    code { background: #1e2937; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>L &amp; P Fleet Hub</h1>
+  <p>One place to open every local service. Dispatch must be running on port 8502.</p>
+  <div class="grid">
+    <a class="dispatch" href="http://127.0.0.1:8502/">Open Dispatch</a>
+    <a class="driver" href="http://127.0.0.1:8502/?view=driver">Open Driver View</a>
+    <a class="web" href="http://127.0.0.1:8080/">Open Website</a>
+  </div>
+  <p style="margin-top:2rem;">If Dispatch fails, run <code>.\run.ps1</code> in the repo folder and watch the window for errors.</p>
+</body>
+</html>

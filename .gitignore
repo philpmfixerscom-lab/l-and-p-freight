@@ -28,4 +28,5 @@ app_v3_recovered.py*
 
 # Deploy artifacts
 deploy/*.log
+deploy/*.err
 deploy/*.exe
