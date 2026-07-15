@@ -84,10 +84,10 @@ except ImportError:
     CARRIER_NAME = "L & P Freight"
     PLATFORM_TITLE = "L & P Freight Platform"
     PAGE_TITLE = "L & P Freight"
-    TAGLINE = "Load more. Deadhead less. Get home."
+    TAGLINE = "Paid miles north. Empty miles never."
     MISSION_BLURB = (
-        "Built for independent bulk haulers and small dispatch teams. "
-        "Track loaded vs empty miles, quote by the ton, and run the cab without enterprise clutter."
+        "When the outbound pays but the return doesn't, small fleets bleed cash. "
+        "Track loaded vs empty, score homebound returns, quote by the ton, update from the cab."
     )
     DEFAULT_OWNER = "Phillip"
     OWNERS = ("Phillip", "Lawson")
@@ -1581,6 +1581,150 @@ def render_target_lane_banner() -> None:
         )
 
 
+def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
+    """Dashboard section: score GA → W NC return loads with transparent breakdown."""
+    st.markdown("---")
+    render_section_header("Cut deadhead home", icon="🔄")
+    st.caption(
+        "You just delivered in **Central Georgia**. Score a return that pulls you toward "
+        f"**{TARGET_LANE_ORIGIN}** — proximity · homebound direction · end-dump fit · rate vs lane."
+    )
+
+    try:
+        from lp_helpers.deadhead import (
+            DEFAULT_DELIVERY_ZONE,
+            last_delivery_location,
+            opportunities_as_candidates,
+            rank_return_candidates,
+            score_return_load,
+        )
+    except Exception as exc:
+        st.warning(f"Deadhead helper unavailable: {exc}")
+        return
+
+    empty_at = last_delivery_location(loads_df) or DEFAULT_DELIVERY_ZONE
+    st.info(f"**Empty near:** {empty_at}  ·  **Home corridor:** {TARGET_LANE_ORIGIN}")
+
+    left, right = st.columns([1.15, 1])
+
+    with left:
+        st.markdown("##### Score this return")
+        r1, r2 = st.columns(2)
+        ret_origin = r1.text_input(
+            "Pickup (where you'd load)",
+            value=empty_at if "georgia" in empty_at.lower() or "ga" in empty_at.lower() else "Central Georgia",
+            key="dh_origin",
+            help="Closer to where you are empty = higher proximity score",
+        )
+        ret_dest = r2.text_input(
+            "Destination (toward home)",
+            value="Spruce Pine / Asheville, NC",
+            key="dh_dest",
+            help="Western NC / Spruce Pine corridor scores highest",
+        )
+        r3, r4 = st.columns(2)
+        ret_commodity = r3.text_input(
+            "Commodity",
+            value="Feldspar",
+            key="dh_commodity",
+            help="End-dump minerals/aggregates score best",
+        )
+        ret_rate = r4.text_input(
+            "Rate ($/ton preferred)",
+            value="45",
+            key="dh_rate",
+            help=f"Compared to lane baseline ~$48/ton",
+        )
+        scored = score_return_load(
+            origin=ret_origin,
+            destination=ret_dest,
+            commodity=ret_commodity,
+            rate_hint=ret_rate,
+            current_location=empty_at,
+            home=TARGET_LANE_ORIGIN,
+        )
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Score", f"{scored.score}")
+        m2.metric("Grade", scored.grade)
+        m3.metric("Call", scored.label[:22] + ("…" if len(scored.label) > 22 else ""))
+
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("Proximity", f"{scored.proximity_pts}/25")
+        b2.metric("Homebound", f"{scored.direction_pts}/35")
+        b3.metric("Dump fit", f"{scored.commodity_pts}/20")
+        b4.metric("Rate", f"{scored.rate_pts}/20")
+
+        st.markdown("**Why this score**")
+        for reason in scored.reasons:
+            st.markdown(f"- {reason}")
+
+        if st.button("Log this as potential load", use_container_width=True, key="dh_to_logger"):
+            prefill_load_logger(
+                shipper="",
+                commodity=ret_commodity,
+                origin=ret_origin,
+                destination=ret_dest,
+                status="Potential",
+                notes=f"Deadhead return candidate · grade {scored.grade} · score {scored.score}",
+            )
+
+    with right:
+        st.markdown("##### Ranked from your board")
+        try:
+            with closing(get_connection()) as conn:
+                opp_df = pd.read_sql_query(
+                    "SELECT * FROM opportunities ORDER BY created_at DESC LIMIT 30",
+                    conn,
+                )
+        except Exception:
+            opp_df = pd.DataFrame()
+
+        if opp_df.empty:
+            st.info(
+                "No board rows yet. Add opportunities on **Board**, or score a call-in on the left."
+            )
+            st.caption(
+                "Tip: paste broker offers with city + commodity + $/ton — rank updates automatically."
+            )
+        else:
+            ranked = rank_return_candidates(
+                opportunities_as_candidates(opp_df),
+                home=TARGET_LANE_ORIGIN,
+                current_location=empty_at,
+            )[:6]
+            for cand, sc in ranked:
+                lane = cand.get("lane") or f"{cand.get('origin')} → {cand.get('destination')}"
+                st.markdown(
+                    f"**{sc.grade} · {sc.score}** &nbsp; {lane}  \n"
+                    f"{cand.get('commodity') or '—'} · {cand.get('rate') or 'rate n/a'}"
+                )
+                st.caption(
+                    f"{sc.label} · Prox {sc.proximity_pts} · Home {sc.direction_pts} · "
+                    f"Fit {sc.commodity_pts} · Rate {sc.rate_pts}"
+                )
+                st.divider()
+
+    with st.expander("How scoring works (transparent rules)", expanded=False):
+        st.markdown(
+            """
+**Four buckets (100 pts max)**
+
+| Bucket | Max | What it asks |
+|--------|-----|----------------|
+| Proximity | 25 | Can I pick up near Central GA after delivery? |
+| Homebound | 35 | Does the drop pull me toward Spruce Pine / W NC? |
+| Dump fit | 20 | Will a 39ft end-dump haul this commodity? |
+| Rate | 20 | Is $/ton (or RPM) respectable vs lane baseline (~$48/t)? |
+
+**Grades:** A ≥80 book it · B ≥65 worth the call · C ≥50 borderline · D empty may be cleaner
+
+**v1 limits:** keyword geography (not turn-by-turn miles), no live broker feed, no wait-time at plant.
+**v2 ideas:** real empty-mile estimate from GPS, historical lane win-rate, DAT/Truckstop pull, multi-stop.
+            """
+        )
+
+
 def render_dashboard_tab() -> None:
     st.subheader("Dashboard")
 
@@ -1623,74 +1767,8 @@ def render_dashboard_tab() -> None:
     with st.expander("🚨 Emergency Dispatch", expanded=False):
         _render_emergency_controls(key_prefix="dash_em", compact=True)
 
-    with st.expander("🔄 Return loads · cut deadhead (GA → NC)", expanded=False):
-        st.caption(
-            "Score opportunities for the **return trip** toward western NC after a "
-            "Central Georgia delivery. Higher score = fewer empty miles home."
-        )
-        try:
-            from lp_helpers.deadhead import (
-                opportunities_as_candidates,
-                rank_return_candidates,
-                score_return_load,
-            )
-
-            # Manual quick scorer
-            st.markdown("##### Score a candidate return")
-            c1, c2 = st.columns(2)
-            ret_origin = c1.text_input(
-                "Pickup (near GA)",
-                value="Central Georgia",
-                key="dh_origin",
-            )
-            ret_dest = c2.text_input(
-                "Destination (toward home)",
-                value="Western NC / Spruce Pine area",
-                key="dh_dest",
-            )
-            c3, c4 = st.columns(2)
-            ret_commodity = c3.text_input("Commodity", value="Aggregate", key="dh_commodity")
-            ret_rate = c4.text_input("Rate hint ($/ton or total)", value="42", key="dh_rate")
-            scored = score_return_load(
-                origin=ret_origin,
-                destination=ret_dest,
-                commodity=ret_commodity,
-                rate_hint=ret_rate,
-                current_location="Central Georgia",
-                home=TARGET_LANE_ORIGIN,
-            )
-            g1, g2, g3 = st.columns(3)
-            g1.metric("Score", f"{scored.score}/100")
-            g2.metric("Grade", scored.grade)
-            g3.metric("Call", scored.label)
-            st.caption(" · ".join(scored.reasons))
-
-            # Board opportunities ranked
-            try:
-                with closing(get_connection()) as conn:
-                    opp_df = pd.read_sql_query(
-                        "SELECT * FROM opportunities ORDER BY created_at DESC LIMIT 25",
-                        conn,
-                    )
-            except Exception:
-                opp_df = pd.DataFrame()
-            if not opp_df.empty:
-                st.markdown("##### From your load board")
-                ranked = rank_return_candidates(
-                    opportunities_as_candidates(opp_df),
-                    home=TARGET_LANE_ORIGIN,
-                    current_location="Central Georgia",
-                )[:8]
-                for cand, sc in ranked:
-                    st.markdown(
-                        f"**{sc.grade} · {sc.score}** — {cand.get('lane') or cand.get('destination')} "
-                        f"· {cand.get('commodity') or '—'} · {cand.get('rate') or 'rate n/a'}"
-                    )
-                    st.caption(sc.label + " — " + "; ".join(sc.reasons[:3]))
-            else:
-                st.info("Add board opportunities (Board tab) to auto-rank return options.")
-        except Exception as exc:
-            st.warning(f"Deadhead helper unavailable: {exc}")
+    # --- First-class deadhead panel (not buried in expander) ---
+    _render_deadhead_return_panel(loads_df)
 
     st.markdown("#### Quick Actions")
     action1, action2, action3, action4 = st.columns(4)

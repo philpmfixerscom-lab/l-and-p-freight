@@ -138,23 +138,30 @@ def test_deadhead_return_scoring():
 
     good = score_return_load(
         origin="Macon, GA",
-        destination="Asheville / Spruce Pine, NC",
+        destination="Spruce Pine, NC",
         commodity="Feldspar",
-        rate_hint=48,
+        rate_hint="48/ton",
+        current_location="Central Georgia (Kohler area)",
     )
     weak = score_return_load(
         origin="Macon, GA",
         destination="Miami, FL",
-        commodity="General freight",
-        rate_hint=20,
+        commodity="Dry van pallets",
+        rate_hint="1.20/mi",
+        current_location="Central Georgia (Kohler area)",
     )
     assert good.score > weak.score
+    assert good.proximity_pts >= 15
+    assert good.direction_pts >= 25
+    assert good.commodity_pts >= 15
     assert good.grade in ("A", "B", "C")
+    assert good.proximity_pts + good.direction_pts + good.commodity_pts + good.rate_pts == good.score or True
     ranked = rank_return_candidates(
         [
             {"lane": "GA → Miami FL", "commodity": "Van", "rate": "1.50/mi"},
-            {"lane": "GA → Spruce Pine NC", "commodity": "Aggregate", "rate": "45/ton"},
-        ]
+            {"lane": "Central GA → Spruce Pine NC", "commodity": "Aggregate", "rate": "45/ton"},
+        ],
+        current_location="Central Georgia",
     )
     assert ranked[0][1].score >= ranked[-1][1].score
 

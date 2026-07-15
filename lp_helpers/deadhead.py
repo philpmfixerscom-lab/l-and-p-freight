@@ -1,58 +1,159 @@
-"""Deadhead minimization — simple return-load scoring for bulk lanes.
+"""Deadhead minimization — practical return-load scoring for bulk haulers.
 
-Designed for 1-5 truck SE bulk haulers (e.g. GA delivery → back toward W NC).
-Scoring is transparent rules — not ML. Fast to ship, easy to explain.
+Scenario: just delivered in Central Georgia; need a load that reduces empty
+miles back toward Spruce Pine / western NC. Transparent rules only (no ML).
+
+Scoring is broken into four buckets a driver/dispatcher can understand:
+  1. Pickup proximity (can I load near where I am?)
+  2. Homebound direction (does the drop pull me north toward home?)
+  3. End-dump commodity fit
+  4. Rate quality vs lane baseline ($/ton context for bulk)
+
+v1 limitations: keyword geography (not true lat/lon routing), no live board
+API, no historical win-rate. See module docstring bottom / score_return_load.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-# Default home base (western NC / Spruce Pine corridor)
 DEFAULT_HOME = "Spruce Pine, NC"
-DEFAULT_DELIVERY_ZONE = "Central Georgia"
+DEFAULT_DELIVERY_ZONE = "Central Georgia (Kohler area)"
+DEFAULT_LANE_BASELINE_PER_TON = 48.0  # typical SP→GA bulk anchor
 
-# Rough highway corridor keywords that reduce empty miles toward home
-HOMEBOUND_KEYWORDS: tuple[str, ...] = (
-    "nc",
-    "north carolina",
-    "spruce pine",
-    "asheville",
-    "marion",
-    "hickory",
-    "charlotte",
-    "boone",
-    "burnsville",
-    "mitchell",
-    "avery",
-    "19e",
-    "hwy 226",
-    "i-26",
-    "i-40",
-    "tennessee",
-    "tn",
-    "virginia",
-    "va",
+# --- Geography keyword rings (practical, not GIS) ---
+
+# Where the truck is now after a Kohler-area drop
+GA_CORE: tuple[str, ...] = (
+    "kohler",
+    "central georgia",
+    "central ga",
+    "macon",
+    "milledgeville",
+    "warner robins",
+    "dublin",
+    "sandersville",
+    "augusta",
+    "athens",
+    "griffin",
+)
+GA_WIDE: tuple[str, ...] = (
+    "georgia",
+    " ga",
+    "ga ",
+    "atlanta",
+    "columbus",
+    "savannah",
+    "albany",
+    "valdosta",
+)
+SC_NEAR: tuple[str, ...] = (
+    "south carolina",
+    " sc",
+    "sc ",
+    "greenville",
+    "spartanburg",
+    "anderson",
+    "columbia sc",
 )
 
-# Bulk / end-dump friendly commodities
-BULK_KEYWORDS: tuple[str, ...] = (
+# Direction toward home: tighter = better for deadhead reduction
+HOME_CORE: tuple[str, ...] = (
+    "spruce pine",
+    "mitchell",
+    "burnsville",
+    "bakersville",
+    "marion nc",
+    "mcdowell",
+    "avery",
+    "yancey",
+)
+HOME_CORRIDOR: tuple[str, ...] = (
+    "asheville",
+    "hickory",
+    "lenoir",
+    "morganton",
+    "boone",
+    "i-26",
+    "i26",
+    "hwy 19e",
+    "19e",
+    "hwy 226",
+    "highway 226",
+    "western nc",
+    "west nc",
+    "mtn city",
+)
+HOME_STATE: tuple[str, ...] = (
+    "north carolina",
+    " n.c",
+    " nc",
+    "nc ",
+    ", nc",
+)
+HOME_NEAR_STATES: tuple[str, ...] = (
+    "tennessee",
+    " tn",
+    "johnson city",
+    "kingsport",
+    "bristol",
+    "southwest va",
+    "virginia",
+)
+
+SOUTH_AWAY: tuple[str, ...] = (
+    "florida",
+    " fl",
+    "miami",
+    "tampa",
+    "orlando",
+    "jacksonville fl",
+    "south florida",
+    "mobile al",
+    "birmingham",  # west, not home
+    "new orleans",
+    "louisiana",
+)
+
+# End-dump fit tiers
+DUMP_EXCELLENT: tuple[str, ...] = (
     "feldspar",
     "mica",
     "quartz",
+    "spar",
     "clay",
     "sand",
     "gravel",
     "aggregate",
-    "lime",
-    "rock",
-    "dirt",
-    "mulch",
-    "fertilizer",
-    "bulk",
+    "crushed",
     "stone",
+    "rock",
+    "lime",
     "ash",
+    "dirt",
+    "fill",
+    "slag",
+)
+DUMP_OK: tuple[str, ...] = (
+    "fertilizer",
+    "mulch",
+    "bulk",
+    "grain",  # possible but messy
+    "salt",
+    "coal",
+)
+DUMP_BAD: tuple[str, ...] = (
+    "reefer",
+    "produce",
+    "pallet",
+    "van only",
+    "dry van",
+    "flatbed steel",
+    "lumber package",
+    "hazmat liquid",
+    "tanker",
+    "container",
 )
 
 
@@ -60,16 +161,64 @@ BULK_KEYWORDS: tuple[str, ...] = (
 class DeadheadScore:
     """Transparent score for a return-load candidate."""
 
-    score: int  # 0-100
+    score: int  # 0-100 overall
     grade: str  # A/B/C/D
     label: str
     reasons: list[str]
+    # Bucket breakdown so UI can show "why" at a glance
+    proximity_pts: int = 0  # max 25
+    direction_pts: int = 0  # max 35
+    commodity_pts: int = 0  # max 20
+    rate_pts: int = 0  # max 20
     empty_miles_estimate: float | None = None
-    source: str = "rules"
+    source: str = "rules_v2"
+    extras: dict[str, Any] = field(default_factory=dict)
 
 
-def _text_blob(*parts: Any) -> str:
+def _blob(*parts: Any) -> str:
     return " ".join(str(p or "") for p in parts).lower()
+
+
+def _hits(text: str, keywords: tuple[str, ...]) -> int:
+    return sum(1 for k in keywords if k in text)
+
+
+def _parse_rate(rate_hint: str | float | None) -> tuple[float | None, str]:
+    """Return (numeric_value, kind) where kind is 'per_ton' | 'per_mile' | 'total' | 'unknown'."""
+    if rate_hint is None or rate_hint == "":
+        return None, "unknown"
+    if isinstance(rate_hint, (int, float)):
+        v = float(rate_hint)
+        # Heuristic: < 15 likely $/mi; 15-120 likely $/ton; else total $
+        if v < 15:
+            return v, "per_mile"
+        if v <= 120:
+            return v, "per_ton"
+        return v, "total"
+    s = str(rate_hint).lower().replace(",", "")
+    kind = "unknown"
+    if "/ton" in s or "per ton" in s or "ton" in s:
+        kind = "per_ton"
+    elif "/mi" in s or "per mile" in s or "rpm" in s:
+        kind = "per_mile"
+    elif "total" in s or "$" in s and s.count(".") <= 1:
+        kind = "total"
+    digits = "".join(c if (c.isdigit() or c == ".") else " " for c in s)
+    parts = [p for p in digits.split() if p]
+    if not parts:
+        return None, kind
+    try:
+        v = float(parts[0])
+    except ValueError:
+        return None, kind
+    if kind == "unknown":
+        if v < 15:
+            kind = "per_mile"
+        elif v <= 120:
+            kind = "per_ton"
+        else:
+            kind = "total"
+    return v, kind
 
 
 def grade_from_score(score: int) -> str:
@@ -77,7 +226,7 @@ def grade_from_score(score: int) -> str:
         return "A"
     if score >= 65:
         return "B"
-    if score >= 45:
+    if score >= 50:
         return "C"
     return "D"
 
@@ -92,106 +241,175 @@ def score_return_load(
     home: str = DEFAULT_HOME,
     current_location: str = DEFAULT_DELIVERY_ZONE,
     empty_miles_estimate: float | None = None,
+    lane_baseline_per_ton: float = DEFAULT_LANE_BASELINE_PER_TON,
 ) -> DeadheadScore:
-    """Score how well a candidate reduces empty miles toward home.
+    """Score a GA-area → homebound candidate with four explainable buckets.
 
-    Transparent points (max ~100):
-      +40  destination pulls toward home corridor
-      +20  origin is near current delivery zone (can book soon)
-      +20  bulk / end-dump friendly commodity
-      +10  rate looks decent (if provided)
-      +10  notes mention backhaul / return / northbound
-      -15  destination is deeper south / away from home
+    Practical framing for the user:
+      "Would this load beat running empty from Central GA back to Spruce Pine?"
     """
-    score = 30  # baseline: any paying load beats pure empty
     reasons: list[str] = []
-    blob_dest = _text_blob(destination, notes)
-    blob_origin = _text_blob(origin, notes)
-    blob_all = _text_blob(origin, destination, commodity, notes, rate_hint)
-    home_l = home.lower()
-    cur_l = current_location.lower()
+    o = _blob(origin)
+    d = _blob(destination)
+    c = _blob(commodity)
+    n = _blob(notes)
+    cur = _blob(current_location)
+    all_txt = _blob(origin, destination, commodity, notes, rate_hint)
 
-    # Destination toward home
-    home_hits = sum(1 for k in HOMEBOUND_KEYWORDS if k in blob_dest)
-    if home_l.split(",")[0] in blob_dest or "spruce pine" in blob_dest:
-        score += 40
-        reasons.append("Destination points home / W NC")
-    elif home_hits >= 2:
-        score += 35
-        reasons.append("Destination on homebound corridor")
-    elif home_hits == 1:
-        score += 20
-        reasons.append("Partial homebound signal")
+    # ---- 1) Pickup proximity (0-25): near the truck after delivery ----
+    proximity = 0
+    if _hits(o, GA_CORE) or _hits(o, GA_CORE) == 0 and _hits(cur + " " + o, GA_CORE):
+        if _hits(o, GA_CORE):
+            proximity = 25
+            reasons.append("Pickup in Core GA delivery zone (can load soon)")
+        elif _hits(o, GA_WIDE):
+            proximity = 18
+            reasons.append("Pickup in Georgia — short empty to shipper")
+    elif _hits(o, GA_WIDE):
+        proximity = 18
+        reasons.append("Pickup in Georgia — short empty to shipper")
+    elif _hits(o, SC_NEAR):
+        proximity = 14
+        reasons.append("Pickup in SC — reasonable empty from GA")
+    elif "nc" in o or "north carolina" in o:
+        proximity = 6
+        reasons.append("Pickup already in NC — may require long empty first")
     else:
-        score -= 5
-        reasons.append("Destination not clearly homebound")
+        proximity = 4
+        reasons.append("Pickup far from GA delivery — factor empty to shipper")
 
-    # Can pick up near where we are (GA delivery zone)
-    ga_tokens = ("ga", "georgia", "kohler", "atlanta", "macon", "augusta", "savannah")
-    if any(t in blob_origin for t in ga_tokens) or any(t in cur_l for t in ga_tokens if t in blob_origin):
-        score += 20
-        reasons.append("Pickup near current GA area")
-    elif "sc" in blob_origin or "south carolina" in blob_origin:
-        score += 10
-        reasons.append("Pickup nearby SE (SC)")
+    # slight boost if origin text overlaps current location tokens
+    if any(tok in o for tok in cur.replace(",", " ").split() if len(tok) > 3):
+        proximity = min(25, proximity + 3)
 
-    # Trailer fit
-    if any(k in _text_blob(commodity) for k in BULK_KEYWORDS):
-        score += 20
-        reasons.append("Bulk / end-dump friendly commodity")
-    elif commodity:
-        score += 5
-        reasons.append("Commodity present — verify trailer fit")
+    # ---- 2) Direction toward home corridor (0-35) ----
+    direction = 0
+    home_town = home.lower().split(",")[0].strip()
+    if home_town and home_town in d:
+        direction = 35
+        reasons.append(f"Drops at home base ({home_town.title()})")
+    elif _hits(d, HOME_CORE):
+        direction = 32
+        reasons.append("Destination in Spruce Pine / mountain core")
+    elif _hits(d, HOME_CORRIDOR):
+        direction = 26
+        reasons.append("Destination on homebound corridor (I-26 / W NC)")
+    elif _hits(d, HOME_STATE) and not _hits(d, SOUTH_AWAY):
+        direction = 18
+        reasons.append("Destination in North Carolina (partial home pull)")
+    elif _hits(d, HOME_NEAR_STATES):
+        direction = 12
+        reasons.append("Near-home state (TN/VA) — better than southbound")
+    else:
+        direction = 4
+        reasons.append("Destination not homebound — limited deadhead help")
 
-    # Rate hint (very light)
-    rate_val = None
-    if isinstance(rate_hint, (int, float)):
-        rate_val = float(rate_hint)
-    elif rate_hint:
-        digits = "".join(c if c.isdigit() or c == "." else " " for c in str(rate_hint))
-        parts = [p for p in digits.split() if p]
-        if parts:
-            try:
-                rate_val = float(parts[0])
-            except ValueError:
-                rate_val = None
-    if rate_val is not None:
-        if rate_val >= 45:
-            score += 10
-            reasons.append(f"Rate looks solid ({rate_val:g})")
-        elif rate_val >= 35:
-            score += 5
-            reasons.append(f"Rate acceptable ({rate_val:g})")
+    if _hits(d, SOUTH_AWAY):
+        direction = max(0, direction - 18)
+        reasons.append("Pulls further south/away — hurts next empty")
+
+    if any(w in all_txt for w in ("backhaul", "return load", "northbound", "head home")):
+        direction = min(35, direction + 4)
+        reasons.append("Explicit backhaul / northbound intent")
+
+    # ---- 3) End-dump commodity (0-20) ----
+    commodity_pts = 0
+    if _hits(c, DUMP_EXCELLENT):
+        commodity_pts = 20
+        reasons.append("Excellent end-dump commodity (bulk mineral/agg)")
+    elif _hits(c, DUMP_OK):
+        commodity_pts = 12
+        reasons.append("Acceptable bulk for end-dump — confirm washout/tarp")
+    elif _hits(c, DUMP_BAD):
+        commodity_pts = 0
+        reasons.append("Poor end-dump fit (van/reefer/tanker-style freight)")
+    elif c.strip():
+        commodity_pts = 6
+        reasons.append("Unknown commodity — verify liner, tarp, gate")
+    else:
+        commodity_pts = 3
+        reasons.append("No commodity listed — verify before booking")
+
+    # ---- 4) Rate quality vs lane (0-20) ----
+    rate_pts = 0
+    rate_val, rate_kind = _parse_rate(rate_hint)
+    if rate_val is None:
+        rate_pts = 6
+        reasons.append("No rate given — score assumes break-even vs empty")
+    elif rate_kind == "per_ton":
+        # Relative to baseline bulk lane (~$48/t outbound reference)
+        ratio = rate_val / max(lane_baseline_per_ton, 1.0)
+        if ratio >= 1.05:
+            rate_pts = 20
+            reasons.append(f"Rate ${rate_val:g}/t at/above lane baseline (${lane_baseline_per_ton:g})")
+        elif ratio >= 0.85:
+            rate_pts = 14
+            reasons.append(f"Rate ${rate_val:g}/t near baseline — OK for homebound")
+        elif ratio >= 0.65:
+            rate_pts = 8
+            reasons.append(f"Rate ${rate_val:g}/t soft — only if empty otherwise")
         else:
-            reasons.append(f"Rate low ({rate_val:g}) — only if empty otherwise")
+            rate_pts = 2
+            reasons.append(f"Rate ${rate_val:g}/t weak vs baseline")
+    elif rate_kind == "per_mile":
+        if rate_val >= 2.5:
+            rate_pts = 16
+            reasons.append(f"RPM ${rate_val:g} strong for return")
+        elif rate_val >= 1.8:
+            rate_pts = 11
+            reasons.append(f"RPM ${rate_val:g} acceptable for homebound")
+        else:
+            rate_pts = 4
+            reasons.append(f"RPM ${rate_val:g} low — watch fuel")
+    else:  # total $
+        if rate_val >= 1200:
+            rate_pts = 15
+            reasons.append(f"Total ~${rate_val:,.0f} looks workable")
+        elif rate_val >= 700:
+            rate_pts = 10
+            reasons.append(f"Total ~${rate_val:,.0f} — check miles")
+        else:
+            rate_pts = 4
+            reasons.append(f"Total ~${rate_val:,.0f} may not beat empty+time")
 
-    if any(w in blob_all for w in ("backhaul", "return", "northbound", "head home", "deadhead")):
-        score += 10
-        reasons.append("Marked as backhaul / return intent")
+    # Optional empty-miles adjustment (if caller estimates)
+    if empty_miles_estimate is not None:
+        if empty_miles_estimate <= 40:
+            proximity = min(25, proximity + 3)
+            reasons.append(f"~{empty_miles_estimate:.0f} mi empty to shipper (tight)")
+        elif empty_miles_estimate >= 150:
+            proximity = max(0, proximity - 6)
+            reasons.append(f"~{empty_miles_estimate:.0f} mi empty to shipper (long)")
 
-    # Deeper south penalty
-    if any(w in blob_dest for w in ("florida", "fl ", "miami", "tampa", "orlando")):
-        score -= 15
-        reasons.append("Further south increases empty risk later")
-
-    score = max(0, min(100, score))
+    raw = proximity + direction + commodity_pts + rate_pts
+    score = max(0, min(100, raw))
     grade = grade_from_score(score)
+
     if grade == "A":
-        label = "Strong homebound backhaul"
+        label = "Book this homebound — beats empty"
     elif grade == "B":
-        label = "Good deadhead reducer"
+        label = "Solid return — worth the call"
     elif grade == "C":
-        label = "Maybe — check miles & rate"
+        label = "Borderline — check miles & wait time"
     else:
-        label = "Weak — empty may be better"
+        label = "Weak — running empty may be cleaner"
 
     return DeadheadScore(
         score=score,
         grade=grade,
         label=label,
         reasons=reasons,
+        proximity_pts=proximity,
+        direction_pts=direction,
+        commodity_pts=commodity_pts,
+        rate_pts=rate_pts,
         empty_miles_estimate=empty_miles_estimate,
-        source="rules",
+        source="rules_v2",
+        extras={
+            "rate_value": rate_val,
+            "rate_kind": rate_kind,
+            "baseline_per_ton": lane_baseline_per_ton,
+        },
     )
 
 
@@ -200,26 +418,43 @@ def rank_return_candidates(
     *,
     home: str = DEFAULT_HOME,
     current_location: str = DEFAULT_DELIVERY_ZONE,
+    lane_baseline_per_ton: float = DEFAULT_LANE_BASELINE_PER_TON,
 ) -> list[tuple[dict[str, Any], DeadheadScore]]:
-    """Score and sort candidates best-first."""
     ranked: list[tuple[dict[str, Any], DeadheadScore]] = []
     for c in candidates:
         sc = score_return_load(
-            origin=str(c.get("origin") or c.get("lane") or ""),
+            origin=str(c.get("origin") or ""),
             destination=str(c.get("destination") or c.get("lane") or ""),
             commodity=str(c.get("commodity") or ""),
             rate_hint=c.get("rate") or c.get("rate_per_ton"),
             notes=str(c.get("notes") or c.get("contact") or ""),
             home=home,
             current_location=current_location,
+            empty_miles_estimate=c.get("empty_miles_estimate"),
+            lane_baseline_per_ton=lane_baseline_per_ton,
         )
+        # Prefer parsing lane into origin/dest when only lane present
+        if not c.get("origin") and c.get("lane"):
+            lane = str(c["lane"])
+            if "→" in lane or "->" in lane:
+                sep = "→" if "→" in lane else "->"
+                left, right = [p.strip() for p in lane.split(sep, 1)]
+                sc = score_return_load(
+                    origin=left,
+                    destination=right,
+                    commodity=str(c.get("commodity") or ""),
+                    rate_hint=c.get("rate") or c.get("rate_per_ton"),
+                    notes=str(c.get("notes") or ""),
+                    home=home,
+                    current_location=current_location,
+                    lane_baseline_per_ton=lane_baseline_per_ton,
+                )
         ranked.append((c, sc))
     ranked.sort(key=lambda x: x[1].score, reverse=True)
     return ranked
 
 
 def opportunities_as_candidates(opportunities_df: Any) -> list[dict[str, Any]]:
-    """Convert a DataFrame/records of board opportunities into scorer dicts."""
     if opportunities_df is None:
         return []
     try:
@@ -231,13 +466,13 @@ def opportunities_as_candidates(opportunities_df: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in records:
         lane = str(r.get("lane") or "")
-        origin, destination = lane, lane
+        origin, destination = "", lane
         if "→" in lane:
-            parts = [p.strip() for p in lane.split("→", 1)]
-            origin, destination = parts[0], parts[1]
+            a, b = [p.strip() for p in lane.split("→", 1)]
+            origin, destination = a, b
         elif "->" in lane:
-            parts = [p.strip() for p in lane.split("->", 1)]
-            origin, destination = parts[0], parts[1]
+            a, b = [p.strip() for p in lane.split("->", 1)]
+            origin, destination = a, b
         out.append(
             {
                 "id": r.get("id"),
@@ -252,3 +487,25 @@ def opportunities_as_candidates(opportunities_df: Any) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def last_delivery_location(loads_df: Any) -> str | None:
+    """Best-effort 'where am I empty' from recent delivered loads."""
+    try:
+        if loads_df is None or getattr(loads_df, "empty", True):
+            return None
+        df = loads_df.copy()
+        if "status" not in df.columns:
+            return None
+        delivered = df[df["status"].astype(str).str.lower().isin(["delivered", "complete", "completed"])]
+        if delivered.empty:
+            # fall back to any load with destination
+            use = df
+        else:
+            use = delivered
+        if "pickup_date" in use.columns:
+            use = use.sort_values("pickup_date", ascending=False)
+        dest = use.iloc[0].get("destination")
+        return str(dest) if dest else None
+    except Exception:
+        return None

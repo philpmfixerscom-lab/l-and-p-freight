@@ -12,20 +12,22 @@ from typing import Any
 CARRIER_NAME = "L & P Freight"
 # Legacy aliases kept for internal flags; never show to end users.
 PLATFORM_EDITION = "Production"
-PLATFORM_TAGLINE_INTERNAL = "Fewer empty miles. Clearer cash flow."
+PLATFORM_TAGLINE_INTERNAL = "Every empty mile is a choice. Make fewer of them."
 PLATFORM_TITLE = "L & P Freight Platform"
 PAGE_TITLE = "L & P Freight"
-# Public-facing tagline — O/O and small dispatch (not personal names)
-TAGLINE = "Load more. Deadhead less. Get home."
+# Public-facing tagline — ownable, memorable
+TAGLINE = "Paid miles north. Empty miles never."
 MISSION_BLURB = (
-    "Built for independent bulk haulers and small dispatch teams on regional lanes. "
-    "Track loaded vs empty miles, quote by the ton, keep shippers warm, and run the cab "
-    "without enterprise clutter — so more miles pay and more nights end at home."
+    "When the outbound pays but the return doesn't, small fleets bleed cash. "
+    "L&P Freight helps owner-operators and 1–5 truck dispatch teams log loads by the ton, "
+    "see deadhead in plain numbers, score homebound returns, and update status from the cab — "
+    "so more days end with money in the account and the truck closer to home."
 )
-MARKETING_HEADLINE = "Run your trucks. Not a mountain of software."
+MARKETING_HEADLINE = "The outbound paid. Don't give it back on the empty."
 MARKETING_SUBHEAD = (
-    "Dispatch, rates, BOLs, and a cab-ready driver view for owner-operators "
-    "and small fleets who live on loaded miles — not empty ones."
+    "Regional bulk tools for owner-operators and small dispatch: "
+    "loaded-mile tracking, $/ton quotes, homebound return scoring, and a cab view "
+    "that doesn't feel like enterprise software."
 )
 
 DRIVERS: tuple[str, ...] = ("Phillip", "Lawson")
