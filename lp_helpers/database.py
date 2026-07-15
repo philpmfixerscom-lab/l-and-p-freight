@@ -1013,6 +1013,14 @@ def init_db() -> None:
         conn.executescript(_SCHEMA_SQL)
         ensure_opportunities_table(conn)
 
+        # Phase B multi-tenant: tenants table + tenant_id columns + backfill
+        try:
+            from lp_helpers.tenancy import ensure_multi_tenant_schema
+
+            ensure_multi_tenant_schema(conn)
+        except Exception:
+            pass
+
         load_cols = {row[1] for row in conn.execute("PRAGMA table_info(loads)").fetchall()}
         if "voice_audio_path" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN voice_audio_path TEXT")

@@ -918,20 +918,20 @@ def init_database() -> None:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def _fetch_leads_cached(tenant_id: str) -> pd.DataFrame:
+    """Cached leads (60s) — tenant-scoped."""
+    from lp_helpers.repositories.leads import list_leads
+
+    with closing(get_connection()) as conn:
+        return list_leads(conn, tenant_id=tenant_id)
+
+
 def fetch_leads() -> pd.DataFrame:
-    """Cached leads (60s) — use clear_data_caches() after writes."""
+    """Leads for current tenant (cache key = tenant_id)."""
     try:
-        with closing(get_connection()) as conn:
-            df = pd.read_sql_query(
-                "SELECT * FROM leads ORDER BY priority, company",
-                conn,
-            )
-        if not df.empty:
-            if "lane_notes" in df.columns:
-                df["notes"] = df["lane_notes"].fillna("")
-            elif "notes" not in df.columns:
-                df["notes"] = ""
-        return df
+        from lp_helpers.tenancy import current_tenant_id
+
+        return _fetch_leads_cached(current_tenant_id())
     except Exception as exc:
         log.exception("fetch_leads failed")
         st.error(f"Could not load leads: {exc}")
@@ -939,18 +939,20 @@ def fetch_leads() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=45, show_spinner=False)
+def _fetch_loads_cached(tenant_id: str) -> pd.DataFrame:
+    """Cached loads (45s) — tenant-scoped."""
+    from lp_helpers.repositories.loads import list_loads
+
+    with closing(get_connection()) as conn:
+        return list_loads(conn, tenant_id=tenant_id)
+
+
 def fetch_loads() -> pd.DataFrame:
-    """Cached loads (45s) — use clear_data_caches() after writes."""
+    """Loads for current tenant (cache key = tenant_id)."""
     try:
-        with closing(get_connection()) as conn:
-            return pd.read_sql_query(
-                """
-                SELECT *, pickup_date AS load_date
-                FROM loads
-                ORDER BY pickup_date DESC, id DESC
-                """,
-                conn,
-            )
+        from lp_helpers.tenancy import current_tenant_id
+
+        return _fetch_loads_cached(current_tenant_id())
     except Exception as exc:
         log.exception("fetch_loads failed")
         st.error(f"Could not load loads: {exc}")
@@ -994,8 +996,8 @@ def fetch_call_logs() -> pd.DataFrame:
 def clear_data_caches() -> None:
     """Invalidate cached tables after inserts/updates so UI stays fresh."""
     try:
-        fetch_leads.clear()
-        fetch_loads.clear()
+        _fetch_leads_cached.clear()
+        _fetch_loads_cached.clear()
         fetch_call_logs.clear()
         fetch_lane_rates.clear()
     except Exception:
@@ -1071,6 +1073,33 @@ def run_platform_health_check() -> None:
         checks.append(("Cached Data Fetch", "OK (leads + loads)"))
     except Exception as exc:
         checks.append(("Cached Data Fetch", f"FAIL {exc}"))
+
+    # 7) Multi-tenant foundation
+    try:
+        from lp_helpers.fleet_context import get_tenant_context
+        from lp_helpers.tenancy import DEFAULT_TENANT_ID
+
+        ctx = get_tenant_context()
+        checks.append(
+            (
+                "Tenant Context",
+                f"OK ({ctx.tenant_id})" if ctx.tenant_id == DEFAULT_TENANT_ID or ctx.tenant_id else f"OK ({ctx.tenant_id})",
+            )
+        )
+    except Exception as exc:
+        checks.append(("Tenant Context", f"FAIL {exc}"))
+
+    # 8) Telematics port
+    try:
+        from lp_helpers.integrations.telematics_port import get_telematics_port
+
+        port = get_telematics_port(get_secret=get_secret)
+        st_status = port.connection_status()
+        checks.append(
+            ("Telematics Port", f"OK ({st_status.provider}/{st_status.mode})")
+        )
+    except Exception as exc:
+        checks.append(("Telematics Port", f"FAIL {exc}"))
 
     for name, status in checks:
         if status.startswith("OK"):
@@ -2034,31 +2063,29 @@ def render_load_logger_tab() -> None:
             deadhead = max(0.0, miles - loaded_miles)
             bol = generate_bol_number()
             try:
+                from lp_helpers.repositories.loads import insert_load
+                from lp_helpers.tenancy import current_tenant_id
+
                 with closing(get_connection()) as conn:
-                    conn.execute(
-                        """
-                        INSERT INTO loads (
-                            bol_number, shipper, commodity, weight_tons, miles,
-                            loaded_miles, deadhead_miles, pickup_date, origin, destination,
-                            rate_per_ton, total_revenue, notes, status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            bol,
-                            shipper.strip(),
-                            preview_commodity.strip(),
-                            weight,
-                            miles,
-                            loaded_miles,
-                            deadhead,
-                            str(pickup),
-                            PRIMARY_LANE["origin"],
-                            destination,
-                            rate_preview,
-                            revenue_preview,
-                            notes,
-                            load_status,
-                        ),
+                    insert_load(
+                        conn,
+                        {
+                            "bol_number": bol,
+                            "shipper": shipper.strip(),
+                            "commodity": preview_commodity.strip(),
+                            "weight_tons": weight,
+                            "miles": miles,
+                            "loaded_miles": loaded_miles,
+                            "deadhead_miles": deadhead,
+                            "pickup_date": str(pickup),
+                            "origin": PRIMARY_LANE["origin"],
+                            "destination": destination,
+                            "rate_per_ton": rate_preview,
+                            "total_revenue": revenue_preview,
+                            "notes": notes,
+                            "status": load_status,
+                        },
+                        tenant_id=current_tenant_id(),
                     )
                     conn.commit()
             except sqlite3.Error as exc:
@@ -3075,6 +3102,13 @@ def main() -> None:
     )
 
     # === Initialize Session State Persistence ===
+    try:
+        from lp_helpers.fleet_context import ensure_session_tenant
+
+        ensure_session_tenant()
+    except Exception:
+        st.session_state.setdefault("tenant_id", "lp-freight")
+
     if "owner_role" not in st.session_state:
         st.session_state["owner_role"] = get_active_owner()
 
@@ -3084,6 +3118,9 @@ def main() -> None:
             st.session_state.night_mode = str(saved).lower() in ("1", "true", "yes")
         except Exception:
             st.session_state.night_mode = True
+
+    # Solo fleets: implied owner_driver role (multi-user later)
+    st.session_state.setdefault("user_role", "owner_driver")
 
     apply_platform_theme(bool(st.session_state.night_mode))
 

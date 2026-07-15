@@ -61,12 +61,23 @@ Influenced by Streamlit session-state docs and fleet UIs (Samsara/Motive) that u
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| **A — TenantContext** | `lp_helpers/fleet_context.py` describes current L&P tenant | Done |
-| **B — Tenant resolution** | Session / login / env selects `tenant_id` | Planned |
-| **C — Data scoping** | All SQL filters by `tenant_id` (leads, loads, settings) | Planned |
-| **D — Multi-user RBAC** | Dispatcher vs driver vs admin roles | Planned |
+| **A — TenantContext** | `fleet_context.py` current L&P tenant | **Done** |
+| **B — Schema + session** | `tenancy.py` migrations; `tenant_id` on business tables; session bind | **Done (foundation)** |
+| **C — Repos enforce scope** | `repositories/loads.py`, `leads.py` filter/insert by tenant | **Done (loads/leads)** |
+| **D — Multi-user RBAC** | `authz.py` roles; login UI | Foundation only (solo = `owner_driver`) |
+| **E — Integration / AI ports** | `integrations/telematics_port.py`, `ai/ports.py` | Foundation shipped |
 
-**Non-breaking rule:** Phase A does not change the live single-tenant DB. Migration scripts must add nullable `tenant_id` with default `lp-freight` before enforcing NOT NULL.
+**Non-breaking rule:** Phase B backfills `tenant_id='lp-freight'`; UX unchanged for single-truck deploys.
+
+### New modules (Phase B+)
+
+| Module | Purpose |
+|--------|---------|
+| `lp_helpers/tenancy.py` | Default tenant id, schema ensure, `current_tenant_id()` |
+| `lp_helpers/authz.py` | RBAC principal + `can`/`require` |
+| `lp_helpers/repositories/` | Tenant-scoped SQL for loads & leads |
+| `lp_helpers/integrations/telematics_port.py` | Traccar / Manual adapters behind a port |
+| `lp_helpers/ai/ports.py` | RateOptimizer / LoadMatcher rules v1 |
 
 ## Hard rules (do not regress)
 

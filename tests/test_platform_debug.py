@@ -78,6 +78,89 @@ def test_fleet_context_default_tenant():
     assert len(list_known_tenants()) >= 1
 
 
+def test_multi_tenant_schema_and_repos(tmp_path, monkeypatch):
+    monkeypatch.setenv("LP_DATA_DIR", str(tmp_path))
+    from lp_helpers import database as dbmod
+    from lp_helpers.repositories import leads as leads_repo
+    from lp_helpers.repositories import loads as loads_repo
+    from lp_helpers.tenancy import DEFAULT_TENANT_ID
+
+    monkeypatch.setattr(dbmod, "DB_PATH", tmp_path / "tenant_test.db")
+    monkeypatch.setattr(dbmod, "ATTACHMENTS_DIR", tmp_path / "attachments")
+    dbmod.init_db()
+
+    with closing(dbmod.get_conn()) as conn:
+        row = conn.execute(
+            "SELECT id, name FROM tenants WHERE id=?", (DEFAULT_TENANT_ID,)
+        ).fetchone()
+        assert row is not None
+        assert row["name"]
+
+        # tenant_id column exists on loads
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(loads)").fetchall()}
+        assert "tenant_id" in cols
+
+        lid = loads_repo.insert_load(
+            conn,
+            {
+                "bol_number": "LP-T-001",
+                "shipper": "Sibelco",
+                "commodity": "Feldspar",
+                "weight_tons": 24,
+                "status": "Booked",
+                "origin": "Spruce Pine, NC",
+                "destination": "Central Georgia",
+            },
+            tenant_id=DEFAULT_TENANT_ID,
+        )
+        conn.commit()
+        assert lid > 0
+        df = loads_repo.list_loads(conn, tenant_id=DEFAULT_TENANT_ID)
+        assert not df.empty
+        assert (df["bol_number"] == "LP-T-001").any()
+        # stored with tenant
+        tid = conn.execute(
+            "SELECT tenant_id FROM loads WHERE bol_number=?", ("LP-T-001",)
+        ).fetchone()[0]
+        assert tid == DEFAULT_TENANT_ID
+
+        lead_id = leads_repo.insert_lead(
+            conn,
+            {"company": "Test Shipper", "status": "Hot", "priority": 1},
+            tenant_id=DEFAULT_TENANT_ID,
+        )
+        conn.commit()
+        assert lead_id > 0
+
+
+def test_authz_and_telematics_port():
+    from lp_helpers.ai.ports import RulesRateOptimizer
+    from lp_helpers.authz import Principal, ROLE_DRIVER, can, default_principal, require
+    from lp_helpers.integrations.telematics_port import (
+        ManualTelematicsAdapter,
+        get_telematics_port,
+    )
+
+    p = default_principal("lp-freight", "Phillip")
+    assert can(p, "load.create")
+    require(p, "lead.manage")
+
+    d = Principal(user_id="1", tenant_id="lp-freight", role=ROLE_DRIVER, display_name="D")
+    assert not can(d, "load.create")
+    assert can(d, "load.status_own")
+
+    port = ManualTelematicsAdapter()
+    assert port.connection_status().ok
+    fix = port.get_live_fix()
+    assert fix is not None and fix.latitude
+    assert get_telematics_port().connection_status().provider in ("manual", "traccar")
+
+    sug = RulesRateOptimizer().suggest(
+        commodity="Feldspar", weight_tons=24, loaded_miles=285, deadhead_miles=50
+    )
+    assert sug.rate_per_ton > 0 and sug.total_revenue > 0
+
+
 def test_database_init_and_schema(tmp_path, monkeypatch):
     db = tmp_path / "test_dispatch.db"
     monkeypatch.setenv("LP_DATA_DIR", str(tmp_path))

@@ -77,20 +77,29 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 def fetch_active_load(get_connection: Callable[[], Any]) -> dict[str, Any]:
     try:
+        from lp_helpers.repositories.loads import fetch_active_load_row
+
         with closing(get_connection()) as conn:
-            row = conn.execute(
-                """
-                SELECT * FROM loads
-                WHERE status IN ('Dispatched', 'In Transit', 'Booked')
-                ORDER BY pickup_date DESC, id DESC
-                LIMIT 1
-                """
-            ).fetchone()
+            row = fetch_active_load_row(conn)
         if row is None:
             return _default_load()
-        return {k: row[k] for k in row.keys()}
+        return row
     except Exception:
-        return _default_load()
+        try:
+            with closing(get_connection()) as conn:
+                row = conn.execute(
+                    """
+                    SELECT * FROM loads
+                    WHERE status IN ('Dispatched', 'In Transit', 'Booked', 'Arrived', 'Loaded')
+                    ORDER BY pickup_date DESC, id DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+            if row is None:
+                return _default_load()
+            return {k: row[k] for k in row.keys()}
+        except Exception:
+            return _default_load()
 
 
 def render_driver_app(
