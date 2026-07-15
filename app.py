@@ -1,12 +1,13 @@
 """
-Lawson Freight Platform v4.0 — elite command center for L & P Dispatch.
-Traccar GPS · Twilio SMS · secure secrets.toml · persistent filters · shared lp_dispatch.db.
+L & P Dispatch — Lawson Freight Platform.
+Optimized for Phillip & Lawson: Spruce Pine NC → Kohler GA · 39ft end-dump · mineral lane.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import shutil
 import sqlite3
 import uuid
 from contextlib import closing
@@ -18,6 +19,18 @@ from typing import Any, Callable, TypeVar
 import pandas as pd
 import streamlit as st
 from fpdf import FPDF
+
+try:
+    import plotly.express as px
+except ImportError:
+    px = None  # type: ignore[assignment]
+
+try:
+    import smtplib
+    from email.mime.text import MIMEText
+except ImportError:
+    smtplib = None  # type: ignore[assignment]
+    MIMEText = None  # type: ignore[assignment,misc]
 
 try:
     import requests
@@ -38,17 +51,78 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "lp_dispatch.db"
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
-APP_VERSION = "4.0"
-
-TAB_OPTIONS = [
-    "Dashboard",
-    "Leads CRM",
-    "Load Logger + Matcher",
-    "Rate Calculator",
-    "BOL Generator",
-    "GPS Tracking",
-    "Notifications",
+BACKUP_DIR = BASE_DIR / "backups"
+APP_VERSION = "4.4 BIG E"
+TRAILER_MAX_TONS = 24
+APPROVED_COMMODITIES = [
+    "Feldspar", "Mica", "Spar", "Clay", "Rock",
+    "Lime", "Fertilizer", "Sand", "Gravel", "Aggregate", "Other",
 ]
+TARGET_LANE_ORIGIN = "Spruce Pine, NC"
+TARGET_LANE_DESTINATION = "Central Georgia (Kohler area)"
+DEFAULT_LANE_MILES = 285
+
+try:
+    from lp_helpers.lawson_profile import (
+        BIG_E_MODE,
+        BIG_E_TAGLINE,
+        CARRIER_NAME,
+        DEFAULT_OWNER,
+        OWNERS,
+        HIGHWAY_CORRIDORS,
+        LAWSON_GEOFENCES,
+        LAWSON_SEED_LEADS,
+        LAWSON_SIM_ROUTE,
+        LOADED_MILE_TARGET,
+        MISSION_BLURB,
+        PAGE_TITLE,
+        PLATFORM_TITLE,
+        PRIMARY_RECEIVER,
+        TAGLINE,
+        TRAILER_DESC,
+        TRUCK_LABEL,
+    )
+except ImportError:
+    BIG_E_MODE = True
+    BIG_E_TAGLINE = "BIG E Elite Refresh — Stable, Automated, Competitive"
+    CARRIER_NAME = "L & P Dispatch"
+    PLATFORM_TITLE = "Lawson Freight Platform"
+    PAGE_TITLE = "Lawson Freight"
+    TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
+    MISSION_BLURB = (
+        "Build loaded miles Spruce Pine NC → Central Georgia (Kohler area). "
+        "Minimize deadhead on Hwy 19E & 226."
+    )
+    DEFAULT_OWNER = "Phillip"
+    OWNERS = ("Phillip", "Lawson")
+    TRUCK_LABEL = "L&P Lawson End-Dump"
+    TRAILER_DESC = "39ft Frameless End-Dump"
+    HIGHWAY_CORRIDORS = "Hwy 19E & 226"
+    LOADED_MILE_TARGET = 0.80
+    PRIMARY_RECEIVER = "Kohler Co."
+    LAWSON_SIM_ROUTE = [
+        (35.912, -82.064, "Spruce Pine, NC"),
+        (35.650, -82.450, "Asheville corridor"),
+        (35.200, -82.800, "I-26 southbound"),
+        (34.500, -83.200, "Atlanta outskirts"),
+        (33.447, -83.809, "Central Georgia (Kohler area)"),
+    ]
+    LAWSON_GEOFENCES = [
+        ("Spruce Pine Yard", 35.912, -82.064, 0.8),
+        ("Kohler Central GA", 32.98, -82.72, 5.0),
+    ]
+    LAWSON_SEED_LEADS = []
+
+TAB_LABELS = [
+    "📊 Dashboard",
+    "👥 Leads",
+    "📝 Logger",
+    "📦 Board",
+    "🗺️ GPS",
+    "📄 BOL",
+    "📲 Alerts",
+]
+TAB_KEYS = ["Dashboard", "Leads", "Logger", "Board", "GPS", "BOL", "Alerts"]
 
 FILTER_DEFAULTS: dict[str, str] = {
     "filter_leads_status": "All",
@@ -57,22 +131,17 @@ FILTER_DEFAULTS: dict[str, str] = {
     "filter_loads_search": "",
     "gps_live_sim": "1",
     "sms_auto_send": "0",
+    "sms_auto_new_load": "1",
 }
 
-SIM_ROUTE: list[tuple[float, float, str]] = [
-    (35.912, -82.064, "Spruce Pine, NC"),
-    (35.650, -82.450, "Asheville corridor"),
-    (35.200, -82.800, "I-26 southbound"),
-    (34.500, -83.200, "Atlanta outskirts"),
-    (33.447, -83.809, "Central Georgia (Kohler area)"),
-]
+SIM_ROUTE: list[tuple[float, float, str]] = LAWSON_SIM_ROUTE
 
 SMS_TEMPLATES: dict[str, str] = {
     "arrival": (
         "L & P FREIGHT | ARRIVAL\n"
         "{company}\n"
         "On site: {location}\n"
-        "Driver: Phillip · 39ft end-dump\n"
+        "Owner: {driver} · 39ft end-dump\n"
         "Reply STOP to opt out."
     ),
     "load update": (
@@ -86,7 +155,7 @@ SMS_TEMPLATES: dict[str, str] = {
         "L & P FREIGHT | DEPARTURE\n"
         "{company}\n"
         "Departing: {location}\n"
-        "ETA per BOL · Phillip / Lawson\n"
+        "ETA per BOL · {driver}\n"
         "Reply STOP to opt out."
     ),
     "rate_confirmation": (
@@ -102,13 +171,19 @@ SMS_TEMPLATES: dict[str, str] = {
         "L & P FREIGHT | DISPATCHED\n"
         "BOL {bol_number}\n"
         "{commodity} · {weight_tons:.1f}t to {destination}\n"
-        "GPS tracking active. — Phillip"
+        "GPS tracking active. — {driver}"
     ),
     "bol_ready": (
         "L & P FREIGHT | BOL READY\n"
         "BOL {bol_number} generated for {shipper}\n"
         "{commodity} · {weight_tons:.1f}t\n"
         "Pickup {pickup_date} · {origin} → {destination}"
+    ),
+    "new_load_logged": (
+        "L & P FREIGHT | NEW LOAD\n"
+        "{shipper} · {commodity} · {weight_tons:.1f}t\n"
+        "BOL {bol_number} · {status}\n"
+        "{origin} → {destination}"
     ),
 }
 
@@ -187,6 +262,23 @@ def persist_setting(key: str, value: str) -> None:
         _local_set_setting(key, value)
 
 
+def get_active_owner() -> str:
+    """Current operator — Phillip or Lawson (persisted in app_settings)."""
+    try:
+        from lp_helpers.ui_components import get_owner_role
+
+        role = get_owner_role()
+        return role if role in OWNERS else DEFAULT_OWNER
+    except ImportError:
+        return _local_get_setting("owner_role", DEFAULT_OWNER) or DEFAULT_OWNER
+
+
+def set_active_owner(role: str) -> None:
+    if role not in OWNERS:
+        return
+    persist_setting("owner_role", role)
+
+
 def load_persistent_filters() -> None:
     for key, default in FILTER_DEFAULTS.items():
         if key not in st.session_state:
@@ -231,11 +323,92 @@ def format_sms(template_key: str, context: dict[str, Any]) -> str:
         "pickup_date": str(date.today()),
     }
     defaults.update(context)
+    if "driver" not in defaults:
+        defaults["driver"] = get_active_owner()
     try:
         return template.format(**defaults)
     except (KeyError, ValueError) as exc:
         log.warning("SMS template format error: %s", exc)
-        return f"L & P FREIGHT: {defaults.get('detail', 'Update')} — Phillip / Lawson"
+        return f"L & P FREIGHT: {defaults.get('detail', 'Update')} — {get_active_owner()}"
+
+
+EMAIL_TEMPLATES: dict[str, str] = {
+    "arrival": (
+        "L & P FREIGHT — Arrival Notice\n\n"
+        "Company: {company}\n"
+        "On site: {location}\n"
+        "Owner: Phillip · 39ft frameless end-dump\n"
+        "Lane: Spruce Pine NC → Central GA"
+    ),
+    "load update": (
+        "L & P FREIGHT — Load Update\n\n"
+        "Company: {company}\n"
+        "{detail}\n"
+        "Spruce Pine NC → Central Georgia"
+    ),
+    "rate_confirmation": (
+        "L & P FREIGHT — Rate Confirmed\n\n"
+        "Company: {company}\n"
+        "{commodity} · {weight_tons:.1f} tons\n"
+        "{origin} → {destination}\n"
+        "${rate_per_ton:.2f}/ton · Total ${total_revenue:,.0f}\n"
+        "BOL {bol_number}"
+    ),
+    "bol_ready": (
+        "L & P FREIGHT — BOL Ready\n\n"
+        "BOL {bol_number} for {shipper}\n"
+        "{commodity} · {weight_tons:.1f} tons\n"
+        "Pickup {pickup_date} · {origin} → {destination}"
+    ),
+}
+
+
+def format_email(template_key: str, context: dict[str, Any]) -> tuple[str, str]:
+    """Return (subject, body) for an email template."""
+    body_template = EMAIL_TEMPLATES.get(template_key, EMAIL_TEMPLATES["load update"])
+    defaults: dict[str, Any] = {
+        "company": "Contact",
+        "location": PRIMARY_LANE["origin"],
+        "detail": "Status update",
+        "commodity": "Bulk",
+        "weight_tons": 0.0,
+        "origin": PRIMARY_LANE["origin"],
+        "destination": PRIMARY_LANE["destination"],
+        "rate_per_ton": 0.0,
+        "total_revenue": 0.0,
+        "bol_number": "DRAFT",
+        "shipper": "Shipper",
+        "pickup_date": str(date.today()),
+    }
+    defaults.update(context)
+    subject = f"L & P Freight — {template_key.replace('_', ' ').title()}"
+    try:
+        return subject, body_template.format(**defaults)
+    except (KeyError, ValueError) as exc:
+        log.warning("Email template format error: %s", exc)
+        return subject, f"L & P FREIGHT update — {defaults.get('detail', 'Status')}"
+
+
+def send_email_notification(to_email: str, subject: str, body: str) -> None:
+    if not smtplib or not MIMEText:
+        raise ImportError("smtplib unavailable")
+    host = get_secret("smtp", "host")
+    port = int(get_secret("smtp", "port", "587") or "587")
+    user = get_secret("smtp", "user")
+    password = get_secret("smtp", "password")
+    from_addr = get_secret("smtp", "from_email", user)
+    if not all([host, user, password, from_addr]):
+        raise ValueError(
+            "SMTP credentials missing — add [smtp] section to .streamlit/secrets.toml"
+        )
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_email.strip()
+    with smtplib.SMTP(host, port, timeout=12) as server:
+        server.starttls()
+        server.login(user, password)
+        server.sendmail(from_addr, [to_email.strip()], msg.as_string())
 
 
 def send_twilio_notification(to_number: str, body: str) -> str:
@@ -280,6 +453,71 @@ def log_sms_event(
         conn.commit()
 
 
+def dispatch_emergency(
+    emergency_key: str,
+    message: str,
+    context: dict[str, Any],
+) -> tuple[bool, str]:
+    """Log incident and annotate active load — no personal SMS; owners call official numbers."""
+    log_sms_event(None, f"emergency_{emergency_key}", message, "emergency")
+
+    load_noted = False
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM loads
+                WHERE status IN ('Dispatched', 'In Transit', 'Booked')
+                ORDER BY pickup_date DESC LIMIT 1
+                """
+            ).fetchone()
+            if row:
+                stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                note = f"\n[{stamp}] EMERGENCY {emergency_key}: {context.get('detail', '')}"
+                conn.execute(
+                    "UPDATE loads SET notes = COALESCE(notes, '') || ? WHERE id = ?",
+                    (note, row["id"]),
+                )
+                conn.commit()
+                load_noted = True
+    except Exception as exc:
+        log.warning("Emergency load note failed: %s", exc)
+
+    if load_noted:
+        return True, "Incident logged on active load. Call official numbers above if you have not already."
+    return True, "Incident logged. Call official numbers above if you have not already."
+
+
+def _render_emergency_controls(
+    *,
+    load: dict[str, Any] | None = None,
+    gps_fix: dict[str, Any] | None = None,
+    key_prefix: str = "dispatch_em",
+    compact: bool = False,
+) -> None:
+    from lp_helpers.emergency_alerts import render_emergency_panel
+
+    if load is None:
+        loads_df = fetch_loads()
+        if not loads_df.empty:
+            active = loads_df[
+                loads_df["status"].astype(str).isin(["Dispatched", "In Transit", "Booked"])
+            ]
+            load = active.iloc[0].to_dict() if not active.empty else loads_df.iloc[0].to_dict()
+        else:
+            load = {}
+
+    render_emergency_panel(
+        driver=get_active_owner(),
+        truck_label=TRUCK_LABEL,
+        load=load,
+        gps_fix=gps_fix,
+        on_dispatch=lambda k, m, c: dispatch_emergency(k, m, c),
+        compact=compact,
+        key_prefix=key_prefix,
+    )
+
+
 def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> None:
     if get_secret("twilio", "auto_send", "0") != "1" and st.session_state.get("sms_auto_send") != "1":
         return
@@ -296,53 +534,72 @@ def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> None
         log.warning("Auto SMS skipped: %s", exc)
 
 
-class TraccarClient:
-    """Traccar REST client with graceful simulation fallback."""
+def notify_dispatcher_new_load(load: dict[str, Any]) -> None:
+    auto_on = (
+        st.session_state.get("sms_auto_new_load", "1") == "1"
+        or get_secret("twilio", "auto_send_new_load", "1") == "1"
+    )
+    if not auto_on:
+        return
+    dispatch_phone = get_secret("twilio", "dispatch_phone", "+18284678218")
+    if not dispatch_phone.strip():
+        return
+    body = format_sms("new_load_logged", load)
+    try:
+        tw_sid = send_twilio_notification(dispatch_phone, body)
+        log_sms_event(None, "new_load_logged", body, "twilio", tw_sid)
+    except Exception as exc:
+        log.warning("Dispatcher new-load SMS skipped: %s", exc)
 
-    def __init__(self) -> None:
-        self.base_url = get_secret("traccar", "url", "http://localhost:8082").rstrip("/")
-        self.email = get_secret("traccar", "email", "admin")
-        self.password = get_secret("traccar", "password", "admin")
-        self._session = requests.Session() if requests else None
 
-    @property
-    def configured(self) -> bool:
-        return bool(self.base_url and requests is not None)
+def _traccar_connection_params() -> tuple[str, str, str, str]:
+    url = st.session_state.get(
+        "traccar_url_input",
+        get_secret("traccar", "url", "http://localhost:8082"),
+    )
+    token = st.session_state.get(
+        "traccar_api_key_input",
+        get_secret("traccar", "api_token", ""),
+    )
+    email = get_secret("traccar", "email", "admin")
+    password = get_secret("traccar", "password", "admin")
+    return url.strip(), token.strip(), email, password
 
-    def _login(self) -> None:
-        if not self._session:
-            raise RuntimeError("requests package not installed")
-        resp = self._session.post(
-            f"{self.base_url}/api/session",
-            data={"email": self.email, "password": self.password},
-            timeout=8,
-        )
-        resp.raise_for_status()
 
-    def fetch_positions(self) -> list[dict[str, Any]]:
-        if not self.configured:
-            return []
-        try:
-            self._login()
-            resp = self._session.get(f"{self.base_url}/api/positions", timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
-            return data if isinstance(data, list) else []
-        except Exception as exc:
-            log.info("Traccar unavailable (%s) — using simulation", exc)
-            return []
+def get_traccar_live() -> Any:
+    from lp_helpers.traccar_live import TraccarLive
 
-    def fetch_devices(self) -> list[dict[str, Any]]:
-        if not self.configured:
-            return []
-        try:
-            self._login()
-            resp = self._session.get(f"{self.base_url}/api/devices", timeout=8)
-            resp.raise_for_status()
-            data = resp.json()
-            return data if isinstance(data, list) else []
-        except Exception:
-            return []
+    url, token, email, password = _traccar_connection_params()
+    return TraccarLive(
+        get_secret=get_secret,
+        url=url,
+        api_token=token,
+        email=email,
+        password=password,
+    )
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _cached_traccar_fleet(
+    url: str, token: str, email: str, password: str
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    from lp_helpers.traccar_live import TraccarLive
+
+    client = TraccarLive(
+        get_secret=get_secret,
+        url=url,
+        api_token=token,
+        email=email,
+        password=password,
+    )
+    status = client.connection_status()
+    if not status.get("ok"):
+        return status, [], []
+    return status, client.fetch_fleet(), client.fetch_devices()
+
+
+def clear_traccar_cache() -> None:
+    _cached_traccar_fleet.clear()
 
 
 def interpolate_route(progress: float) -> tuple[float, float, str]:
@@ -376,6 +633,7 @@ def inject_elite_dark_css() -> None:
             --lf-blue: #7dd3fc;
             --lf-red: #fb7185;
             --lf-sidebar: #060a10;
+            --lf-shadow: rgba(0,0,0,0.35);
         }
         .stApp { background: var(--lf-bg) !important; }
         div[data-testid="stMetric"] label { color: var(--lf-muted) !important; }
@@ -384,7 +642,7 @@ def inject_elite_dark_css() -> None:
         }
         .stTextInput input, .stNumberInput input, .stTextArea textarea,
         .stSelectbox > div > div {
-            background: #1a2436 !important;
+            background: var(--lf-card) !important;
             color: var(--lf-text) !important;
             border-color: var(--lf-border) !important;
         }
@@ -393,8 +651,8 @@ def inject_elite_dark_css() -> None:
             display: inline-block; padding: 0.25rem 0.65rem; border-radius: 20px;
             font-size: 0.75rem; font-weight: 700; margin-right: 0.5rem;
         }
-        .lf-gps-badge.live { background: #064e3b; color: #6ee7b7; }
-        .lf-gps-badge.sim { background: #422006; color: #fdba74; }
+        .lf-gps-badge.live { background: rgba(94,234,212,0.15); color: var(--lf-green); }
+        .lf-gps-badge.sim { background: rgba(251,146,60,0.15); color: var(--lf-orange); }
         </style>
         """,
         unsafe_allow_html=True,
@@ -411,7 +669,7 @@ PRIMARY_LANE = {
 }
 
 TRAILER_MAX_TONS = 24
-DEFAULT_LANE_MILES = 280
+DEFAULT_LANE_MILES = 285
 FUEL_COST_PER_MILE = 0.72
 OPS_COST_PER_MILE = 0.18
 DEFAULT_DEADHEAD_MILES = 285
@@ -474,41 +732,93 @@ CALL_OUTCOMES = [
     "Callback scheduled",
 ]
 
-SEED_LEADS = [
-    {
-        "company": "Sibelco Spruce Pine",
-        "phone": "Main: 828-592-2780 | Quartz site: 828-592-2820",
-        "lane_notes": "Highway 19E, Spruce Pine, NC 28777 — High-purity quartz + feldspar/mica byproducts",
-        "commodity_focus": "Quartz, Feldspar, Mica",
-        "status": "New",
-        "priority": 1,
-    },
-    {
-        "company": "Covia",
-        "phone": "Industrial sales: 1-800-243-9004",
-        "lane_notes": "7638 S Hwy 226, Spruce Pine, NC — Feldspar & minerals producer",
-        "commodity_focus": "Feldspar, Minerals",
-        "status": "New",
-        "priority": 2,
-    },
-    {
-        "company": "K-T Feldspar (The Quartz Corp)",
-        "phone": "828-765-9621",
-        "lane_notes": "8342 Hwy 226 N, Spruce Pine, NC 28777 — Key feldspar shipper",
-        "commodity_focus": "Feldspar",
-        "status": "New",
-        "priority": 3,
-    },
-    {
-        "company": "Feldspar Trucking (Trimac)",
-        "phone": "828-765-7491",
-        "lane_notes": "Local hauler — good intel source for backhauls",
-        "commodity_focus": "Bulk / brokered",
-        "status": "New",
-        "priority": 4,
-    },
-]
+SEED_LEADS = LAWSON_SEED_LEADS or []
 
+
+def render_section_header(title: str, icon: str = "") -> None:
+    """Reusable section header with optional icon."""
+    st.markdown(
+        f"""
+        <div style="
+            display:flex;
+            align-items:center;
+            gap:10px;
+            margin:20px 0 12px 0;
+        ">
+            <h2 style="
+                margin:0;
+                font-size:1.35rem;
+                font-weight:700;
+            ">
+                {icon} {title}
+            </h2>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+def validate_load_inputs(
+    shipper: str,
+    commodity: str,
+    weight: float,
+    rate_per_ton: float,
+    total_revenue: float,
+    pricing_mode: str,
+) -> list[str]:
+    errors = []
+    if not shipper or not str(shipper).strip():
+        errors.append("Shipper is required.")
+    if not commodity or not str(commodity).strip():
+        errors.append("Commodity is required.")
+    if weight is None or weight <= 0:
+        errors.append("Weight must be greater than zero.")
+    if weight > TRAILER_MAX_TONS:
+        errors.append(f"Weight exceeds {TRAILER_MAX_TONS}-ton trailer limit.")
+    if pricing_mode == "Rate per ton" and (rate_per_ton is None or rate_per_ton <= 0):
+        errors.append("Enter a valid rate per ton.")
+    if pricing_mode == "Total revenue" and (total_revenue is None or total_revenue <= 0):
+        errors.append("Enter a valid total revenue.")
+    return errors
+
+
+def validate_bol_load(load: dict[str, Any]) -> list[str]:
+    errors = []
+    if not load.get("bol_number"):
+        errors.append("Load is missing a BOL number.")
+    if not load.get("shipper"):
+        errors.append("Load is missing a shipper.")
+    if not load.get("commodity"):
+        errors.append("Load is missing a commodity.")
+    if not load.get("weight_tons") or float(load.get("weight_tons", 0)) <= 0:
+        errors.append("Load has invalid weight.")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Auto-backup
+# ---------------------------------------------------------------------------
+
+def auto_backup_db() -> None:
+    try:
+        if not DB_PATH.exists():
+            return
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = BACKUP_DIR / f"lp_dispatch_{stamp}.db"
+        shutil.copy2(DB_PATH, dest)
+        log.info("Auto-backup created: %s", dest)
+    except Exception as exc:
+        log.warning("Auto-backup skipped: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# DB init + seed
+# ---------------------------------------------------------------------------
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -544,13 +854,15 @@ def init_database() -> None:
             cursor.execute(
                 """
                 INSERT INTO leads
-                    (company, contact_name, phone, commodity_focus, lane_notes,
+                    (company, contact_name, phone, email, commodity_focus, lane_notes,
                      status, priority, created_at)
-                VALUES (?, 'Dispatch', ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """,
                 (
                     lead["company"],
-                    lead["phone"],
+                    lead.get("contact_name", "Dispatch"),
+                    lead.get("phone", ""),
+                    lead.get("email", ""),
                     lead["commodity_focus"],
                     lead["lane_notes"],
                     lead["status"],
@@ -571,7 +883,10 @@ def fetch_leads() -> pd.DataFrame:
                 conn,
             )
         if not df.empty:
-            df["notes"] = df["lane_notes"].fillna("")
+            if "lane_notes" in df.columns:
+                df["notes"] = df["lane_notes"].fillna("")
+            elif "notes" not in df.columns:
+                df["notes"] = ""
         return df
     except Exception as exc:
         log.exception("fetch_leads failed")
@@ -629,16 +944,19 @@ def fetch_call_logs() -> pd.DataFrame:
 def compute_dashboard_metrics(
     leads_df: pd.DataFrame, loads_df: pd.DataFrame
 ) -> dict[str, float | int]:
-    hot_leads_contacted = 0
+    hot_leads = 0
     if not leads_df.empty:
-        hot_leads_contacted = int((leads_df["status"] != "New").sum())
+        hot_leads = int(leads_df["status"].astype(str).isin(["Hot", "Active", "Negotiating"]).sum())
 
     if loads_df.empty:
         return {
-            "hot_leads_contacted": hot_leads_contacted,
+            "hot_leads": hot_leads,
             "loads_logged": 0,
             "pipeline_revenue": 0.0,
             "avg_rate_per_ton": 0.0,
+            "loaded_share": 0.0,
+            "deadhead_miles": 0.0,
+            "in_transit": 0,
         }
 
     pipeline_revenue = float(loads_df["total_revenue"].fillna(0).sum())
@@ -649,11 +967,31 @@ def compute_dashboard_metrics(
         rates = loads_df["rate_per_ton"].dropna()
         avg_rate_per_ton = float(rates.mean()) if not rates.empty else 0.0
 
+    miles_col = loads_df["miles"] if "miles" in loads_df.columns else pd.Series(0, index=loads_df.index)
+    if "loaded_miles" in loads_df.columns:
+        loaded = float(loads_df["loaded_miles"].fillna(miles_col).fillna(0).sum())
+    else:
+        loaded = float(miles_col.sum())
+    total_miles = float(miles_col.sum()) if "miles" in loads_df.columns else loaded
+    if "deadhead_miles" in loads_df.columns:
+        deadhead = float(loads_df["deadhead_miles"].fillna(0).sum())
+    else:
+        deadhead = 0.0
+    if deadhead <= 0 and total_miles > 0:
+        deadhead = max(0.0, total_miles - loaded)
+    loaded_share = (loaded / total_miles) if total_miles > 0 else 0.0
+    in_transit = int(
+        loads_df["status"].astype(str).isin(["Dispatched", "In Transit"]).sum()
+    )
+
     return {
-        "hot_leads_contacted": hot_leads_contacted,
+        "hot_leads": hot_leads,
         "loads_logged": len(loads_df),
         "pipeline_revenue": pipeline_revenue,
         "avg_rate_per_ton": avg_rate_per_ton,
+        "loaded_share": loaded_share,
+        "deadhead_miles": deadhead,
+        "in_transit": in_transit,
     }
 
 
@@ -694,6 +1032,12 @@ def generate_bol_number() -> str:
 
 
 def generate_bol_pdf(load: dict) -> bytes:
+    try:
+        from lp_helpers.bol_export import generate_branded_bol_pdf
+
+        return generate_branded_bol_pdf(load, app_version=APP_VERSION)
+    except ImportError:
+        pass
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -875,7 +1219,7 @@ def apply_load_prefill(prefill: dict) -> None:
 
 def prefill_load_logger(**kwargs) -> None:
     st.session_state.load_prefill = kwargs
-    navigate_to_tab("Load Logger + Matcher")
+    navigate_to_tab("Logger")
 
 
 def match_lane_rates(
@@ -902,29 +1246,49 @@ def match_lane_rates(
 
 
 def navigate_to_tab(tab_name: str) -> None:
-    st.session_state.active_tab = tab_name
-    st.session_state.main_navigation = tab_name
+    if tab_name == "Rates":
+        st.session_state.open_rates_expander = True
+        tab_name = "Dashboard"
+    if tab_name in TAB_KEYS:
+        st.session_state.active_tab = tab_name
+        label = TAB_LABELS[TAB_KEYS.index(tab_name)]
+        st.session_state.nav_hint = f"👉 **{label}** tab"
     st.rerun()
+
+
+def _persist_owner_role() -> None:
+    role = st.session_state.get("lawson_owner_role", DEFAULT_OWNER)
+    if role in OWNERS:
+        set_active_owner(role)
+
+
+def render_lawson_sidebar_extras() -> None:
+    """Owner role + Lawson lane context in sidebar."""
+    active = get_active_owner()
+    st.selectbox(
+        "Operating as",
+        list(OWNERS),
+                index=list(OWNERS).index(active) if active in OWNERS else 0,
+        key="lawson_owner_role",
+        on_change=_persist_owner_role,
+    )
 
 
 def render_sidebar() -> None:
     with st.sidebar:
-        st.header("Lawson Freight")
-        st.markdown(
-            "**Mission:** Build loaded miles Spruce Pine NC → Central Georgia "
-            "(Kohler area). Minimize deadhead."
+        render_sidebar_brand(
+            carrier=CARRIER_NAME,
+            lane_origin=TARGET_LANE_ORIGIN,
+            lane_dest=TARGET_LANE_DESTINATION,
+            trailer=TRAILER_DESC,
         )
-        st.divider()
-        st.subheader("Trailer Specs")
-        st.markdown("- **Type:** 39 ft frameless end-dump")
-        st.markdown("- **Rated capacity:** ~24 tons")
-        st.divider()
-        st.subheader("Approved Commodities")
-        for commodity in APPROVED_COMMODITIES[:8]:
-            st.markdown(f"- {commodity}")
-        st.divider()
-        st.caption(f"Database: `{DB_PATH.name}`")
-        st.caption(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        render_lawson_sidebar_extras()
+        st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
+        render_day_night_toggle()
+        if st.button("🚛 Driver View", use_container_width=True):
+            st.session_state.view_mode = "driver"
+            st.rerun()
+        st.caption(TAGLINE)
 
 
 def render_target_lane_banner() -> None:
@@ -938,7 +1302,7 @@ def render_target_lane_banner() -> None:
     with lane_col2:
         st.markdown(
             "<div style='text-align:center;font-size:1.4rem;font-weight:800;"
-            "color:#e85d04;padding:0.25rem 0;'>➜ TARGET LANE ➜</div>",
+            "color:var(--lf-orange);padding:0.25rem 0;'>➜ TARGET LANE ➜</div>",
             unsafe_allow_html=True,
         )
     with lane_col3:
@@ -958,43 +1322,134 @@ def render_dashboard_tab() -> None:
 
     render_target_lane_banner()
 
-    st.info(
-        "**Mission:** Build loaded miles from Spruce Pine, NC to Central Georgia "
-        "(Kohler area). Every empty mile is margin lost — prioritize backhauls, "
-        "feldspar/quartz shippers on Hwy 19E & 226, and lane rates that cover "
-        "fuel + deadhead."
-    )
+    st.info(f"**{CARRIER_NAME} Mission:** {MISSION_BLURB}")
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric(
-        "Hot Leads Contacted",
-        metrics["hot_leads_contacted"],
-        help="Leads with status other than New",
+    loaded_pct = metrics["loaded_share"]
+    loaded_delta = (
+        f"{(loaded_pct - LOADED_MILE_TARGET):.0%} vs target"
+        if loaded_pct > 0
+        else f"Target {LOADED_MILE_TARGET:.0%}"
     )
-    kpi2.metric("Total Loads Logged", metrics["loads_logged"])
-    kpi3.metric("Pipeline Revenue", f"${metrics['pipeline_revenue']:,.0f}")
-    kpi4.metric("Avg Rate per Ton", f"${metrics['avg_rate_per_ton']:.2f}")
+    kpi1.metric(
+        "Loaded Mile Share",
+        f"{loaded_pct:.0%}",
+        delta=loaded_delta,
+        delta_color="normal" if loaded_pct >= LOADED_MILE_TARGET else "inverse",
+        help=f"Lawson target ≥ {LOADED_MILE_TARGET:.0%} on Spruce Pine → Kohler lane",
+    )
+    kpi2.metric("Pipeline Revenue", f"${metrics['pipeline_revenue']:,.0f}")
+    kpi3.metric(
+        "Deadhead Miles",
+        f"{metrics['deadhead_miles']:,.0f}",
+        help="Empty miles on logged loads — minimize for margin",
+    )
+    kpi4.metric("Avg Rate / Ton", f"${metrics['avg_rate_per_ton']:.2f}")
+
+    kpi5, kpi6, kpi7, kpi8 = st.columns(4)
+    kpi5.metric("Hot / Active Leads", metrics["hot_leads"])
+    kpi6.metric("Loads Logged", metrics["loads_logged"])
+    kpi7.metric("In Transit / Dispatched", metrics["in_transit"])
+    kpi8.metric("Primary Receiver", PRIMARY_RECEIVER[:16])
+
+    with st.expander("🚨 Emergency Dispatch", expanded=False):
+        _render_emergency_controls(key_prefix="dash_em", compact=True)
 
     st.markdown("#### Quick Actions")
     action1, action2, action3, action4 = st.columns(4)
     if action1.button("Log New Call / Update Lead", use_container_width=True):
-        navigate_to_tab("Leads CRM")
+        navigate_to_tab("Leads")
     if action2.button("Log Potential Load", use_container_width=True):
-        navigate_to_tab("Load Logger + Matcher")
+        navigate_to_tab("Logger")
     if action3.button("Open Rate Calculator", use_container_width=True):
-        navigate_to_tab("Rate Calculator")
+        st.session_state.open_rates_expander = True
+        navigate_to_tab("Dashboard")
     if action4.button("Generate BOL", use_container_width=True):
-        navigate_to_tab("BOL Generator")
+        navigate_to_tab("BOL")
 
     st.divider()
-    st.markdown("#### Recent Activity")
+    render_section_header("Analytics", icon="📊")
+
+    if not loads_df.empty and px is not None:
+        try:
+            from lp_helpers.analytics_dashboard import (
+                build_deadhead_chart,
+                build_rate_per_mile_chart,
+                build_revenue_chart,
+                build_status_pie,
+            )
+
+            chart_left, chart_right = st.columns(2)
+            with chart_left:
+                rev_fig = build_revenue_chart(loads_df)
+                if rev_fig:
+                    st.plotly_chart(rev_fig, use_container_width=True)
+                elif not loads_df.empty:
+                    shipper_rev = (
+                        loads_df.groupby("shipper", as_index=False)["total_revenue"]
+                        .sum()
+                        .sort_values("total_revenue", ascending=False)
+                    )
+                    fig = px.bar(
+                        shipper_rev,
+                        x="shipper",
+                        y="total_revenue",
+                        color="shipper",
+                        title="Revenue by Shipper",
+                    )
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+            with chart_right:
+                status_fig = build_status_pie(loads_df)
+                if status_fig:
+                    st.plotly_chart(status_fig, use_container_width=True)
+            chart_left2, chart_right2 = st.columns(2)
+            with chart_left2:
+                rate_fig = build_rate_per_mile_chart(loads_df)
+                if rate_fig:
+                    st.plotly_chart(rate_fig, use_container_width=True)
+            with chart_right2:
+                dh_fig = build_deadhead_chart(loads_df)
+                if dh_fig:
+                    st.plotly_chart(dh_fig, use_container_width=True)
+        except ImportError:
+            if px is not None and "total_revenue" in loads_df.columns:
+                fig = px.bar(
+                    loads_df,
+                    x="shipper",
+                    y="total_revenue",
+                    color="commodity",
+                    title="Pipeline Revenue by Shipper",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+    elif loads_df.empty:
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📋",
+            "No loads logged yet",
+            "Log your first load in the Logger tab to unlock revenue and deadhead analytics.",
+        )
+    else:
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📊",
+            "Plotly not installed",
+            "Install plotly for interactive dashboard charts: pip install plotly",
+        )
+
+    st.divider()
+    render_section_header("Recent Activity", icon="🕒")
 
     activity_left, activity_right = st.columns(2)
 
     with activity_left:
         st.markdown("**Last 5 Loads**")
         if loads_df.empty:
-            st.caption("No loads logged yet.")
+            from lp_helpers.ui_components import render_empty_state
+
+            render_empty_state("📦", "No loads logged yet.")
         else:
             load_cols = [
                 c
@@ -1017,13 +1472,17 @@ def render_dashboard_tab() -> None:
     with activity_right:
         st.markdown("**Last 5 Lead Notes**")
         if leads_df.empty:
-            st.caption("No leads in CRM.")
+            from lp_helpers.ui_components import render_empty_state
+
+            render_empty_state("📝", "No leads in CRM.")
         else:
             notes_df = leads_df.copy()
             notes_df["notes"] = notes_df["notes"].fillna("").astype(str)
             notes_df = notes_df[notes_df["notes"].str.strip() != ""]
             if notes_df.empty:
-                st.caption("No lead notes recorded yet.")
+                from lp_helpers.ui_components import render_empty_state
+
+                render_empty_state("💬", "No lead notes recorded yet.")
             else:
                 sort_col = (
                     "last_contact"
@@ -1039,14 +1498,24 @@ def render_dashboard_tab() -> None:
                     hide_index=True,
                 )
 
+    rates_open = st.session_state.pop("open_rates_expander", False)
+    with st.expander("💰 Rate Calculator", expanded=rates_open):
+        render_rate_calculator_tab(embedded=True)
+
 
 def render_leads_crm_tab() -> None:
-    st.subheader("Leads CRM")
+    st.subheader("Leads")
     st.caption("Log calls, update status, and track Spruce Pine shipper outreach.")
 
     leads_df = fetch_leads()
     if leads_df.empty:
-        st.warning("No leads found. Database will seed hot leads on next refresh.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📞",
+            "No leads found",
+            "Hot leads will seed automatically on next refresh, or add them manually.",
+        )
         return
 
     fc1, fc2 = st.columns([1, 2])
@@ -1081,14 +1550,14 @@ def render_leads_crm_tab() -> None:
         )
         filtered = filtered[mask]
 
-    st.markdown("#### All Leads")
+    render_section_header("All Leads", icon="👥")
     display_df = filtered[
         [c for c in ["company", "phone", "commodity_focus", "status", "last_contact", "notes"] if c in filtered.columns]
     ]
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     st.divider()
-    st.markdown("#### Log New Call / Update Lead")
+    render_section_header("Log New Call / Update Lead", icon="📞")
 
     lead_options = {
         f"{row['company']} (ID {row['id']})": int(row["id"])
@@ -1150,17 +1619,19 @@ def render_leads_crm_tab() -> None:
             st.error(f"Could not save lead update: {exc}")
 
     st.divider()
-    st.markdown("#### Recent Calls")
+    render_section_header("Recent Calls", icon="🕒")
     calls_df = fetch_call_logs()
     if calls_df.empty:
-        st.caption("No calls logged yet.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state("📞", "No calls logged yet.")
     else:
         call_cols = [c for c in ["logged_at", "company", "call_type", "outcome", "notes"] if c in calls_df.columns]
         st.dataframe(calls_df[call_cols].head(10), use_container_width=True, hide_index=True)
 
 
 def render_load_logger_tab() -> None:
-    st.subheader("Load Logger + Matcher")
+    st.subheader("Logger")
     render_target_lane_banner()
 
     prefill = st.session_state.pop("load_prefill", {})
@@ -1178,7 +1649,7 @@ def render_load_logger_tab() -> None:
     if prefill_commodity not in commodity_options:
         prefill_commodity = "Other"
 
-    st.markdown("#### Log New Load")
+    render_section_header("Log New Load", icon="📝")
     row1a, row1b = st.columns(2)
     pickup = row1a.date_input(
         "Date",
@@ -1268,6 +1739,7 @@ def render_load_logger_tab() -> None:
     destination = st.text_input(
         "Destination",
         value=prefill.get("destination", PRIMARY_LANE["destination"]),
+        placeholder=f"{PRIMARY_RECEIVER} / Kohler area",
         key="load_destination",
     )
     notes = st.text_area(
@@ -1303,16 +1775,17 @@ def render_load_logger_tab() -> None:
     submitted = st.button("Save Load", type="primary", use_container_width=True, key="save_load_btn")
 
     if submitted:
-        if not shipper or not str(shipper).strip():
-            st.error("Shipper is required.")
-        elif not preview_commodity or not str(preview_commodity).strip():
-            st.error("Commodity is required.")
-        elif weight <= 0:
-            st.error("Weight must be greater than zero.")
-        elif rate_preview <= 0 or revenue_preview <= 0:
-            st.error("Enter a valid rate per ton or total revenue.")
-        elif weight > TRAILER_MAX_TONS:
-            st.error(f"Weight exceeds {TRAILER_MAX_TONS}-ton trailer limit.")
+        errors = validate_load_inputs(
+            shipper=shipper,
+            commodity=preview_commodity,
+            weight=weight,
+            rate_per_ton=rate_input if pricing_mode == "Rate per ton" else 0.0,
+            total_revenue=revenue_input if pricing_mode == "Total revenue" else 0.0,
+            pricing_mode=pricing_mode,
+        )
+        if errors:
+            for err in errors:
+                st.error(err)
         else:
             miles = float(
                 st.session_state.get("_load_prefill_miles", DEFAULT_LANE_MILES)
@@ -1369,6 +1842,7 @@ def render_load_logger_tab() -> None:
                 match = leads_df[leads_df["company"].astype(str).str.lower() == shipper.strip().lower()]
                 if not match.empty:
                     lead_phone = str(match.iloc[0].get("phone", ""))
+            notify_dispatcher_new_load(saved_load)
             maybe_auto_notify_load(saved_load, lead_phone)
             st.success(
                 f"Load saved — {load_status} · BOL {bol} · "
@@ -1377,7 +1851,7 @@ def render_load_logger_tab() -> None:
             st.rerun()
 
     st.divider()
-    st.markdown("#### Recent Logged Loads")
+    render_section_header("Recent Logged Loads", icon="📋")
     loads_df = fetch_loads()
     lf1, lf2 = st.columns([1, 2])
     load_status_filter = lf1.selectbox(
@@ -1401,7 +1875,9 @@ def render_load_logger_tab() -> None:
         save_filter("filter_loads_search", load_search)
 
     if loads_df.empty:
-        st.caption("No loads logged yet.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state("📋", "No loads logged yet.")
     else:
         view = loads_df.copy()
         if load_status_filter != "All":
@@ -1456,8 +1932,9 @@ def render_load_logger_tab() -> None:
             st.dataframe(matches, use_container_width=True, hide_index=True)
 
 
-def render_rate_calculator_tab() -> None:
-    st.subheader("Rate Calculator")
+def render_rate_calculator_tab(*, embedded: bool = False) -> None:
+    if not embedded:
+        st.subheader("Rates")
     st.caption("Quick quoting for calls — Spruce Pine → Central GA lane")
 
     lane1, lane2 = st.columns(2)
@@ -1605,100 +2082,366 @@ def render_rate_calculator_tab() -> None:
         st.dataframe(lane_rates_df, use_container_width=True, hide_index=True)
 
 
-def render_gps_tracking_tab() -> None:
-    st.subheader("GPS Tracking")
-    st.caption("Traccar live positions · Spruce Pine → Central GA lane simulation fallback")
+def render_load_board_tab() -> None:
+    st.subheader("Load Board")
+    st.caption("BulkLoads NC/GA intel · log opportunities · minimize deadhead on Spruce Pine → Kohler")
 
-    client = TraccarClient()
-    live_sim = st.toggle(
-        "Live route simulation",
+    from lp_helpers.load_board import (
+        NC_GA_MARKET_INTEL,
+        fetch_opportunities,
+        insert_opportunity,
+        upsert_market_intel,
+    )
+
+    render_target_lane_banner()
+
+    with st.form("board_opportunity"):
+        c1, c2 = st.columns(2)
+        lane = c1.text_input(
+            "Lane",
+            value=f"{PRIMARY_LANE['origin']} → {PRIMARY_LANE['destination']}",
+        )
+        commodity = c2.selectbox("Commodity", APPROVED_COMMODITIES)
+        c3, c4 = st.columns(2)
+        rate = c3.text_input("Rate", placeholder="$48/ton")
+        contact = c4.text_input("Contact", placeholder="Broker / shipper phone")
+        notes = st.text_area("Notes", placeholder="Weight, equipment, pickup window…")
+        if st.form_submit_button("Save Opportunity", type="primary", use_container_width=True):
+            if lane.strip():
+                try:
+                    with closing(get_connection()) as conn:
+                        insert_opportunity(
+                            conn,
+                            lane=lane.strip(),
+                            commodity=commodity,
+                            rate=rate.strip(),
+                            contact=contact.strip(),
+                            notes=notes.strip(),
+                            source="manual",
+                        )
+                        conn.commit()
+                    st.success(f"Saved — {lane}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            else:
+                st.error("Lane is required.")
+
+    render_section_header("NC/GA End-Dump Market Intel", icon="📈")
+    if st.button("Refresh BulkLoads Intel", use_container_width=True):
+        st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
+        added, updated, errors = 0, 0, 0
+        with closing(get_connection()) as conn:
+            for item in NC_GA_MARKET_INTEL:
+                try:
+                    if upsert_market_intel(
+                        conn,
+                        lane=item["lane"],
+                        commodity=item["commodity"],
+                        rate=item["rate"],
+                        contact=item["contact"],
+                        notes=item.get("notes", ""),
+                    ):
+                        added += 1
+                    else:
+                        updated += 1
+                except Exception as exc:
+                    errors += 1
+                    log.warning("BulkLoads upsert failed: %s", exc)
+            conn.commit()
+        msg = f"Intel sync — {added} new, {updated} updated"
+        if errors:
+            msg += f", {errors} errors (see logs)"
+        st.success(msg)
+        st.rerun()
+
+    refreshed = st.session_state.get("load_board_refreshed", "Not refreshed this session")
+    st.caption(f"Last refresh: {refreshed}")
+
+    for item in NC_GA_MARKET_INTEL:
+        st.markdown(
+            f"**{item['commodity']}** · {item['lane']} · "
+            f"**{item['rate']}** · {item['contact']}  \n"
+            f"_{item['notes']}_"
+        )
+
+    render_section_header("Saved Opportunities", icon="💼")
+    try:
+        with closing(get_connection()) as conn:
+            opps_df = fetch_opportunities(conn)
+    except Exception:
+        opps_df = pd.DataFrame()
+    if opps_df.empty:
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📦",
+            "No opportunities yet",
+            "Refresh intel or log an opportunity above to get started.",
+        )
+    else:
+        show = [c for c in ["lane", "commodity", "rate", "contact", "source", "created_at"] if c in opps_df.columns]
+        st.dataframe(opps_df[show], use_container_width=True, hide_index=True)
+
+        st.markdown("#### Book to Logger")
+        labels = [
+            f"{r.get('commodity', '?')} — {r.get('lane', '?')}"
+            for _, r in opps_df.iterrows()
+        ]
+        pick = st.selectbox("Opportunity", labels)
+        if st.button("Pre-fill Logger", use_container_width=True):
+            row = opps_df.iloc[labels.index(pick)].to_dict()
+            parts = str(row.get("lane", "")).split("→")
+            dest = parts[-1].strip() if len(parts) > 1 else PRIMARY_LANE["destination"]
+            prefill_load_logger(
+                shipper=row.get("contact", ""),
+                commodity=row.get("commodity", "Feldspar"),
+                destination=dest,
+                notes=row.get("notes", ""),
+                status="Potential",
+            )
+
+
+def render_gps_tracking_tab() -> None:
+    st.header("Traccar GPS Fleet Tracking")
+    st.subheader("Live Truck Locations")
+    st.caption(f"{TRUCK_LABEL} · Spruce Pine → Central GA · geofence alerts · sim fallback")
+
+    default_url = get_secret("traccar", "url", "http://localhost:8082")
+    default_token = get_secret("traccar", "api_token", "")
+
+    cfg1, cfg2 = st.columns(2)
+    traccar_url = cfg1.text_input(
+        "Traccar Server URL",
+        value=st.session_state.get("traccar_url_input", default_url),
+        placeholder="http://your-traccar-server:8082",
+        key="traccar_url_input",
+    )
+    traccar_key = cfg2.text_input(
+        "API Token / Key",
+        value=st.session_state.get("traccar_api_key_input", default_token),
+        type="password",
+        placeholder="Bearer token or email:password",
+        key="traccar_api_key_input",
+    )
+
+    opt1, opt2, opt3 = st.columns(3)
+    live_sim = opt1.toggle(
+        "Simulation fallback",
         value=st.session_state.get("gps_live_sim", "1") == "1",
         key="gps_sim_toggle",
     )
     save_filter("gps_live_sim", "1" if live_sim else "0")
+    opt2.caption("Leave token blank to use email/password from secrets.toml")
+    refresh_clicked = opt3.button("Refresh GPS", type="primary", use_container_width=True)
+
+    if refresh_clicked:
+        clear_traccar_cache()
+        persist_setting("traccar_url", traccar_url.strip())
+        if traccar_key.strip():
+            persist_setting("traccar_api_token", traccar_key.strip())
+
+    url, token, email, password = _traccar_connection_params()
+    traccar = get_traccar_live()
+
+    if refresh_clicked or st.session_state.get("gps_auto_fetch", True):
+        conn_status, fleet, devices = _cached_traccar_fleet(url, token, email, password)
+    else:
+        conn_status, fleet, devices = traccar.connection_status(), [], []
 
     if "gps_sim_progress" not in st.session_state:
         st.session_state.gps_sim_progress = 0.0
     if live_sim:
         st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.03) % 1.0
 
-    positions = client.fetch_positions()
-    devices = client.fetch_devices()
-    using_sim = not positions
+    live_units = [f for f in fleet if f.get("latitude") is not None]
+    using_sim = not conn_status.get("ok") or not live_units
 
-    if using_sim:
-        lat, lon, location_label = interpolate_route(st.session_state.gps_sim_progress)
-        speed = 58.0
-        device_name = "L&P End-Dump (Sim)"
+    if conn_status.get("ok"):
+        st.success(
+            f"Connected to Traccar — {len(devices)} device(s), "
+            f"{len(live_units)} with live position"
+        )
+    elif refresh_clicked:
+        st.error(f"Connection failed — {conn_status.get('message', 'check Traccar server')}")
+    else:
+        st.warning(f"Traccar offline — {conn_status.get('message', 'not connected')}")
+
+    if using_sim and live_sim:
+        sim_lat, sim_lon, sim_label = interpolate_route(st.session_state.gps_sim_progress)
+        primary = {
+            "device_name": f"{TRUCK_LABEL} (Sim)",
+            "latitude": sim_lat,
+            "longitude": sim_lon,
+            "speed_mph": 58.0,
+            "status": "simulation",
+        }
+        map_fleet = [primary]
         st.markdown(
             '<span class="lf-gps-badge sim">● SIMULATION</span>',
             unsafe_allow_html=True,
         )
-    else:
-        pos = positions[0]
-        lat = float(pos.get("latitude", SIM_ROUTE[0][0]))
-        lon = float(pos.get("longitude", SIM_ROUTE[0][1]))
-        speed = float(pos.get("speed", 0)) * 1.15078  # knots → mph approx
-        device_name = str(pos.get("deviceId", "Traccar device"))
-        location_label = f"Device {device_name}"
+    elif live_units:
+        map_fleet = live_units
         st.markdown(
-            '<span class="lf-gps-badge live">● LIVE TRACCAR</span>',
+            '<span class="lf-gps-badge live">● LIVE TRACCAR FLEET</span>',
             unsafe_allow_html=True,
         )
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Latitude", f"{lat:.5f}")
-    m2.metric("Longitude", f"{lon:.5f}")
-    m3.metric("Speed", f"{speed:.0f} mph")
-    m4.metric("Location", location_label[:28])
-
-    if HAS_FOLIUM:
-        center_lat = (SIM_ROUTE[0][0] + SIM_ROUTE[-1][0]) / 2
-        center_lon = (SIM_ROUTE[0][1] + SIM_ROUTE[-1][1]) / 2
-        fmap = folium.Map(location=[center_lat, center_lon], zoom_start=7, tiles="CartoDB dark_matter")
-        route_coords = [(p[0], p[1]) for p in SIM_ROUTE]
-        folium.PolyLine(route_coords, color="#ff8c42", weight=4, opacity=0.85).add_to(fmap)
-        for p_lat, p_lon, p_label in SIM_ROUTE:
-            folium.CircleMarker(
-                [p_lat, p_lon], radius=5, color="#7dd3fc", fill=True, popup=p_label
-            ).add_to(fmap)
-        folium.Marker(
-            [lat, lon],
-            popup=f"{device_name} @ {speed:.0f} mph",
-            icon=folium.Icon(color="orange", icon="truck", prefix="fa"),
-        ).add_to(fmap)
-        st_folium(fmap, width=None, height=420, returned_objects=[])
     else:
-        st.warning("Install folium + streamlit-folium for interactive map: pip install folium streamlit-folium")
-        render_target_lane_banner()
+        map_fleet = []
+        st.error("No GPS data — check Traccar server or enable simulation fallback.")
 
-    with st.expander("Traccar connection"):
+    if map_fleet:
+        primary = map_fleet[0]
+        lat = primary["latitude"]
+        lon = primary["longitude"]
+        speed = primary.get("speed_mph", 0)
+        device_name = primary.get("device_name", TRUCK_LABEL)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Latitude", f"{lat:.5f}")
+        m2.metric("Longitude", f"{lon:.5f}")
+        m3.metric("Speed", f"{speed:.0f} mph")
+        m4.metric("Primary unit", str(device_name)[:22])
+
+        if not using_sim and st.button("Save primary fix to telematics", use_container_width=True):
+            try:
+                with closing(get_connection()) as conn:
+                    traccar.persist_telematics(conn, primary)
+                st.success("Position logged to telematics table.")
+            except Exception as exc:
+                st.error(str(exc))
+
+        geofences = LAWSON_GEOFENCES
+
+        def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            from math import asin, cos, radians, sin, sqrt
+
+            r = 3958.8
+            dlat = radians(lat2 - lat1)
+            dlon = radians(lon2 - lon1)
+            a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+            return 2 * r * asin(sqrt(a))
+
+        for gf_name, gf_lat, gf_lon, gf_radius_mi in geofences:
+            dist = _haversine_mi(lat, lon, gf_lat, gf_lon)
+            if dist <= gf_radius_mi:
+                st.success(f"Geofence alert: inside **{gf_name}** ({dist:.1f} mi from center)")
+                if st.button(f"Log arrival SMS for {gf_name}", key=f"gps_arrival_{gf_name}"):
+                    body = format_sms("arrival", {"location": gf_name, "company": "Dispatch"})
+                    log_sms_event(None, "geofence_arrival", body, "gps_geofence")
+                    st.info("Arrival alert logged — send from **Alerts** tab.")
+
+        if HAS_FOLIUM:
+            center_lat = lat
+            center_lon = lon
+            fmap = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB dark_matter")
+            route_coords = [(p[0], p[1]) for p in SIM_ROUTE]
+            folium.PolyLine(route_coords, color="#ff8c42", weight=4, opacity=0.85).add_to(fmap)
+            for gf_name, gf_lat, gf_lon, gf_radius_mi in geofences:
+                folium.Circle(
+                    [gf_lat, gf_lon],
+                    radius=int(gf_radius_mi * 1609),
+                    color="#5eead4",
+                    fill=True,
+                    fill_opacity=0.12,
+                    popup=gf_name,
+                ).add_to(fmap)
+            for unit in map_fleet:
+                if unit.get("latitude") is None:
+                    continue
+                icon_color = "green" if unit.get("status") == "online" else "orange"
+                folium.Marker(
+                    [unit["latitude"], unit["longitude"]],
+                    popup=(
+                        f"{unit.get('device_name', 'Truck')} · "
+                        f"{unit.get('speed_mph', 0):.0f} mph · {unit.get('status', '?')}"
+                    ),
+                    icon=folium.Icon(color=icon_color, icon="truck", prefix="fa"),
+                ).add_to(fmap)
+            st_folium(fmap, width=700, height=500, returned_objects=[])
+        else:
+            st.warning("Install folium + streamlit-folium for map: pip install folium streamlit-folium")
+
+    if fleet:
+        st.markdown("#### Fleet devices")
+        fleet_rows = [
+            {
+                "Name": f.get("device_name"),
+                "Status": f.get("status"),
+                "Lat": f.get("latitude"),
+                "Lon": f.get("longitude"),
+                "Speed mph": round(float(f.get("speed_mph") or 0), 1),
+            }
+            for f in fleet
+        ]
+        st.dataframe(pd.DataFrame(fleet_rows), use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.markdown("#### 🚨 Emergency")
+    primary_fix = map_fleet[0] if map_fleet else None
+    _render_emergency_controls(
+        gps_fix=primary_fix if primary_fix and not using_sim else None,
+        key_prefix="gps_em",
+    )
+
+    st.info(
+        "Setup Traccar self-hosted or cloud for real device tracking. "
+        "Add server URL + API token above, or configure `[traccar]` in `.streamlit/secrets.toml`."
+    )
+
+    with st.expander("Traccar connection details"):
         st.code(
-            f"URL: {client.base_url}\nEmail: {client.email}\n"
-            f"Devices: {len(devices)} · Positions: {len(positions)}",
+            f"URL: {url}\n"
+            f"Auth: {'API token' if token else f'email {email}'}\n"
+            f"Devices: {len(devices)} · Live fixes: {len(live_units)}\n"
+            f"Version: {conn_status.get('version', '—')}",
             language="text",
         )
-        if st.button("Refresh GPS", use_container_width=True):
-            st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.1) % 1.0
-            st.rerun()
 
 
-def render_notifications_tab() -> None:
-    st.subheader("Notifications")
-    st.caption("Professional Twilio SMS templates · auto-send on dispatch · secure secrets.toml")
+def render_alerts_tab() -> None:
+    st.subheader("Alerts")
+    st.caption("Twilio SMS · SMTP email · driver emergency numbers · secure secrets.toml")
+
+    _render_emergency_controls(key_prefix="alert_em")
+
+    st.divider()
 
     tw_ok = all([
         get_secret("twilio", "account_sid"),
         get_secret("twilio", "auth_token"),
         get_secret("twilio", "from_number"),
     ])
+    smtp_ok = all([
+        get_secret("smtp", "host"),
+        get_secret("smtp", "user"),
+        get_secret("smtp", "password"),
+    ])
+    status_cols = st.columns(2)
     if tw_ok:
-        st.success("Twilio credentials loaded from secrets.toml")
+        status_cols[0].success("Twilio SMS ready")
     else:
-        st.warning(
-            "Twilio not configured — copy `.streamlit/secrets.toml.example` to "
-            "`.streamlit/secrets.toml` and fill in [twilio] credentials."
-        )
+        status_cols[0].warning("Twilio not configured — add [twilio] to secrets.toml")
+    if smtp_ok:
+        status_cols[1].success("SMTP email ready")
+    else:
+        status_cols[1].warning("SMTP not configured — add [smtp] to secrets.toml")
+
+    dispatch_phone = st.text_input(
+        "Dispatch Phone (E.164)",
+        value=get_secret("twilio", "dispatch_phone", "+18284678218"),
+        key="twilio_dispatch_phone",
+    )
+    if dispatch_phone != _local_get_setting("twilio_dispatch_phone", ""):
+        persist_setting("twilio_dispatch_phone", dispatch_phone)
+
+    auto_new_load = st.toggle(
+        "Auto-send SMS to dispatcher when new load is logged",
+        value=st.session_state.get("sms_auto_new_load", "1") == "1",
+        key="sms_auto_new_load_toggle",
+    )
+    save_filter("sms_auto_new_load", "1" if auto_new_load else "0")
 
     auto_send = st.toggle(
         "Auto-send SMS when load status is Dispatched / In Transit",
@@ -1707,25 +2450,40 @@ def render_notifications_tab() -> None:
     )
     save_filter("sms_auto_send", "1" if auto_send else "0")
 
+    if st.button("Send Test Alert", key="twilio_test_alert"):
+        try:
+            body = "L & P FREIGHT Alert: New load opportunity ready."
+            tw_sid = send_twilio_notification(dispatch_phone, body)
+            log_sms_event(None, "test_alert", body, "twilio", tw_sid)
+            st.success("Test SMS sent!")
+        except Exception as exc:
+            st.error(str(exc))
+
+    st.markdown("#### Automation Rules")
+    st.write("• **New Load Logged** → SMS to dispatcher")
+    st.write("• **Load Status Dispatched / In Transit** → SMS to shipper lead")
+    st.write("• **BOL Ready** → Logged + optional notify")
+
+    st.divider()
+
     leads_df = fetch_leads()
     lead_map = {
         f"{row['company']} (ID {row['id']})": row.to_dict()
         for _, row in leads_df.iterrows()
     } if not leads_df.empty else {}
 
+    channel = st.radio("Channel", ["SMS", "Email"], horizontal=True, key="alert_channel")
+
     n1, n2 = st.columns(2)
-    alert_type = n1.selectbox(
-        "Template",
-        list(SMS_TEMPLATES.keys()),
-        key="notif_template",
-    )
+    template_keys = list(SMS_TEMPLATES.keys())
+    alert_type = n1.selectbox("Template", template_keys, key="notif_template")
     selected = n2.selectbox(
         "Recipient lead",
         list(lead_map.keys()) if lead_map else ["—"],
         key="notif_lead",
     )
 
-    lead = lead_map.get(selected, {"company": "Contact", "phone": ""})
+    lead = lead_map.get(selected, {"company": "Contact", "phone": "", "email": ""})
     extra = st.text_input(
         "Detail / location",
         value=PRIMARY_LANE["origin"],
@@ -1748,39 +2506,75 @@ def render_notifications_tab() -> None:
         "pickup_date": str(date.today()),
     }
     sms_text = format_sms(alert_type, context)
-    st.text_area("Message preview", sms_text, height=140, key="notif_preview")
+    email_subject, email_body = format_email(alert_type, context)
+
+    if channel == "SMS":
+        st.text_area("SMS preview", sms_text, height=140, key="notif_preview")
+    else:
+        st.text_input("Email subject", email_subject, key="notif_email_subject")
+        st.text_area("Email preview", email_body, height=140, key="notif_email_preview")
 
     b1, b2, b3 = st.columns(3)
     if b1.button("Copy & log", use_container_width=True):
+        logged_msg = sms_text if channel == "SMS" else email_body
         log_sms_event(
             lead.get("id") if isinstance(lead.get("id"), int) else None,
             alert_type,
-            sms_text,
-            "clipboard",
+            logged_msg,
+            "clipboard" if channel == "SMS" else "email_clipboard",
         )
-        st.success("Logged to sms_log — copy message above.")
+        st.success("Logged to alert history.")
 
-    test_to = b2.text_input("Send to (E.164)", placeholder="+18285550123", key="notif_test_to", label_visibility="collapsed")
-    if b3.button("Send via Twilio", use_container_width=True, type="primary"):
-        to_num = test_to.strip() or normalize_phone(str(lead.get("phone", "")).split("|")[0])
-        if not to_num:
-            st.error("Enter a phone number or select a lead with a phone.")
-        else:
-            try:
-                tw_sid = send_twilio_notification(to_num, sms_text)
-                log_sms_event(
-                    lead.get("id") if isinstance(lead.get("id"), int) else None,
-                    alert_type,
-                    sms_text,
-                    "twilio",
-                    tw_sid,
-                )
-                st.success(f"Sent — SID {tw_sid}")
-            except Exception as exc:
-                st.error(str(exc))
+    if channel == "SMS":
+        test_to = b2.text_input(
+            "Send to (E.164)",
+            placeholder="+18285550123",
+            key="notif_test_to",
+            label_visibility="collapsed",
+        )
+        if b3.button("Send via Twilio", use_container_width=True, type="primary"):
+            to_num = test_to.strip() or normalize_phone(str(lead.get("phone", "")).split("|")[0])
+            if not to_num:
+                st.error("Enter a phone number or select a lead with a phone.")
+            else:
+                try:
+                    tw_sid = send_twilio_notification(to_num, sms_text)
+                    log_sms_event(
+                        lead.get("id") if isinstance(lead.get("id"), int) else None,
+                        alert_type,
+                        sms_text,
+                        "twilio",
+                        tw_sid,
+                    )
+                    st.success(f"Sent — SID {tw_sid}")
+                except Exception as exc:
+                    st.error(str(exc))
+    else:
+        test_email = b2.text_input(
+            "Send to (email)",
+            placeholder="dispatch@shipper.com",
+            key="notif_test_email",
+            label_visibility="collapsed",
+        )
+        if b3.button("Send via SMTP", use_container_width=True, type="primary"):
+            to_addr = test_email.strip() or str(lead.get("email", "")).strip()
+            if not to_addr:
+                st.error("Enter an email or select a lead with an email on file.")
+            else:
+                try:
+                    send_email_notification(to_addr, email_subject, email_body)
+                    log_sms_event(
+                        lead.get("id") if isinstance(lead.get("id"), int) else None,
+                        alert_type,
+                        email_body,
+                        "smtp",
+                    )
+                    st.success(f"Email sent to {to_addr}")
+                except Exception as exc:
+                    st.error(str(exc))
 
     st.divider()
-    st.markdown("#### SMS Log")
+    render_section_header("Alert Log", icon="📋")
     try:
         with closing(get_connection()) as conn:
             sms_df = pd.read_sql_query(
@@ -1794,7 +2588,9 @@ def render_notifications_tab() -> None:
                 conn,
             )
         if sms_df.empty:
-            st.caption("No messages logged yet.")
+            from lp_helpers.ui_components import render_empty_state
+
+            render_empty_state("💬", "No messages logged yet.")
         else:
             st.dataframe(sms_df, use_container_width=True, hide_index=True)
     except sqlite3.Error:
@@ -1802,12 +2598,18 @@ def render_notifications_tab() -> None:
 
 
 def render_bol_generator_tab() -> None:
-    st.subheader("BOL Generator")
-    st.caption("Generate printable PDF Bills of Lading from logged loads.")
+    st.subheader("BOL")
+    st.caption("ReportLab branded PDF Bills of Lading from logged loads.")
 
     loads_df = fetch_loads()
     if loads_df.empty:
-        st.info("No loads logged yet. Log a load in **Load Logger + Matcher** first.")
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "📄",
+            "No loads logged yet",
+            "Log a load in the Logger tab first, then generate a BOL here.",
+        )
         return
 
     options = {
@@ -1830,24 +2632,29 @@ def render_bol_generator_tab() -> None:
     pdf_name = bol_pdf_filename(load)
 
     if st.button("Generate PDF BOL", type="primary", use_container_width=True):
-        try:
-            pdf_bytes = generate_bol_pdf(load)
-            st.session_state["bol_pdf_bytes"] = pdf_bytes
-            st.session_state["bol_pdf_name"] = pdf_name
-            ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
-            out_path = ATTACHMENTS_DIR / pdf_name
-            out_path.write_bytes(pdf_bytes)
-            bol_msg = format_sms("bol_ready", load)
-            log_sms_event(None, "bol_ready", bol_msg, "generated")
-            st.success(f"BOL generated — saved to attachments/{pdf_name}")
-            if st.session_state.get("sms_auto_send") == "1":
-                st.info("BOL ready notification logged. Enable Twilio to auto-send.")
-        except OSError as exc:
-            log.exception("BOL file write failed")
-            st.error(f"Could not save BOL file: {exc}")
-        except Exception as exc:
-            log.exception("BOL generation failed")
-            st.error(f"BOL generation failed: {exc}")
+        bol_errors = validate_bol_load(load)
+        if bol_errors:
+            for err in bol_errors:
+                st.error(err)
+        else:
+            try:
+                pdf_bytes = generate_bol_pdf(load)
+                st.session_state["bol_pdf_bytes"] = pdf_bytes
+                st.session_state["bol_pdf_name"] = pdf_name
+                ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+                out_path = ATTACHMENTS_DIR / pdf_name
+                out_path.write_bytes(pdf_bytes)
+                bol_msg = format_sms("bol_ready", load)
+                log_sms_event(None, "bol_ready", bol_msg, "generated")
+                st.success(f"BOL generated — saved to attachments/{pdf_name}")
+                if st.session_state.get("sms_auto_send") == "1":
+                    st.info("BOL ready notification logged. Enable Twilio to auto-send.")
+            except OSError as exc:
+                log.exception("BOL file write failed")
+                st.error(f"Could not save BOL file: {exc}")
+            except Exception as exc:
+                log.exception("BOL generation failed")
+                st.error(f"BOL generation failed: {exc}")
 
     if (
         st.session_state.get("bol_pdf_bytes")
@@ -1862,38 +2669,73 @@ def render_bol_generator_tab() -> None:
         )
 
 
+def _driver_view_requested() -> bool:
+    try:
+        if st.query_params.get("view") == "driver":
+            return True
+    except Exception:
+        pass
+    return st.session_state.get("view_mode") == "driver"
+
+
+def _exit_driver_view() -> None:
+    st.session_state.view_mode = "dispatch"
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+
+
 def main() -> None:
+    auto_backup_db()
+
     st.set_page_config(
-        page_title="Lawson Freight Platform",
+        page_title=PAGE_TITLE,
         page_icon="🚛",
         layout="wide",
     )
 
     load_persistent_filters()
 
+    try:
+        from lp_helpers.mobile_web import (
+            inject_mobile_css,
+            inject_mobile_shell_js,
+            inject_pwa_head,
+        )
+
+        inject_pwa_head()
+        inject_mobile_css()
+        inject_mobile_shell_js()
+    except ImportError:
+        pass
+
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Dashboard"
-    if st.session_state.active_tab not in TAB_OPTIONS:
+    if st.session_state.active_tab not in TAB_KEYS:
         st.session_state.active_tab = "Dashboard"
-
-    if not DB_PATH.exists():
-        st.error(
-            f"`{DB_PATH}` not found. Run the main L & P Freight app once (`run.ps1`) "
-            "to initialize lp_dispatch.db, then relaunch this app."
-        )
-        st.stop()
 
     night_mode = False
     try:
         from lp_helpers.database import init_db
-        from lp_helpers.ui_components import inject_road_css, is_night_mode, render_day_night_toggle
+        from lp_helpers.ui_components import inject_road_css, is_night_mode, render_day_night_toggle, render_sidebar_brand, render_section_header
 
         init_db()
         night_mode = is_night_mode()
         with st.sidebar:
+            render_sidebar_brand(
+                carrier=CARRIER_NAME,
+                lane_origin=TARGET_LANE_ORIGIN,
+                lane_dest=TARGET_LANE_DESTINATION,
+                trailer=TRAILER_DESC,
+            )
+            render_lawson_sidebar_extras()
             st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
             render_day_night_toggle()
-            st.caption(f"v{APP_VERSION} · GPS · SMS · BOL")
+            if st.button("🚛 Driver View", use_container_width=True):
+                st.session_state.view_mode = "driver"
+                st.rerun()
+            st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")
         inject_road_css()
         if night_mode:
             inject_elite_dark_css()
@@ -1903,35 +2745,61 @@ def main() -> None:
     else:
         init_database()
 
-    st.title("Lawson Freight Platform")
-    st.caption(
-        f"Spruce Pine, NC — 39ft frameless end-dump · v{APP_VERSION} · {DB_PATH.name}"
-    )
+    if _driver_view_requested():
+        from lp_helpers.driver_mobile import render_driver_app
 
-    selected_tab = st.radio(
-        "Navigation",
-        TAB_OPTIONS,
-        horizontal=True,
-        label_visibility="collapsed",
-        index=TAB_OPTIONS.index(st.session_state.active_tab),
-        key="main_navigation",
-    )
-    st.session_state.active_tab = selected_tab
+        def _traccar_fix_for_driver() -> dict[str, Any] | None:
+            url, token, email, password = _traccar_connection_params()
+            status, fleet, _devices = _cached_traccar_fleet(url, token, email, password)
+            if status.get("ok"):
+                return get_traccar_live().get_live_fix(None)
+            return None
 
-    if selected_tab == "Dashboard":
+        render_driver_app(
+            get_connection=get_connection,
+            get_active_owner=get_active_owner,
+            truck_label=TRUCK_LABEL,
+            get_traccar_fix=_traccar_fix_for_driver,
+            format_sms=format_sms,
+            log_sms_event=log_sms_event,
+            on_emergency=dispatch_emergency,
+            on_exit=_exit_driver_view,
+        )
+        return
+
+    st.title(f"🚛 {PLATFORM_TITLE}")
+    st.caption(f"{TAGLINE} · {TRAILER_DESC} · {APP_VERSION} · `{DB_PATH.name}`")
+
+    nav_hint = st.session_state.pop("nav_hint", None)
+    if nav_hint:
+        st.info(nav_hint)
+
+    (
+        tab_dashboard,
+        tab_leads,
+        tab_logger,
+        tab_board,
+        tab_gps,
+        tab_bol,
+        tab_alerts,
+    ) = st.tabs(TAB_LABELS)
+
+    with tab_dashboard:
         render_dashboard_tab()
-    elif selected_tab == "Leads CRM":
+    with tab_leads:
         render_leads_crm_tab()
-    elif selected_tab == "Load Logger + Matcher":
+    with tab_logger:
         render_load_logger_tab()
-    elif selected_tab == "Rate Calculator":
-        render_rate_calculator_tab()
-    elif selected_tab == "BOL Generator":
-        render_bol_generator_tab()
-    elif selected_tab == "GPS Tracking":
+    with tab_board:
+        render_load_board_tab()
+    with tab_gps:
         render_gps_tracking_tab()
-    elif selected_tab == "Notifications":
-        render_notifications_tab()
+    with tab_bol:
+        render_bol_generator_tab()
+    with tab_alerts:
+        render_alerts_tab()
+
+    st.caption(BIG_E_TAGLINE)
 
 
 if __name__ == "__main__":
