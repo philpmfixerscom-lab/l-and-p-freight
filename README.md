@@ -13,18 +13,16 @@ Spruce Pine NC · 39ft / 24-ton end-dump · Spruce Pine → Central Georgia lane
 | **Dispatch App** | Full operations command center | http://127.0.0.1:8502 |
 | **Driver App** | Cab mobile UI (GPS, status, emergencies) | http://127.0.0.1:8502/?view=driver |
 
-<<<<<<< HEAD
 Production: **https://dispatch.lpfreight.com/** · **/app/** · **/driver/**
-=======
+
 **Quick demo:** Settings → **LOAD DEMO DATA** → Dashboard → AI Intelligence → Documents.
->>>>>>> ab68846242f4f5269a6ae84320e7ed9685bb4e23
 
 ---
 
 ## Quick Start (Local)
 
 ```powershell
-cd "Projects/L & P Freight"
+cd "Projects/L & P Freight/lawson-freight-platform"
 .\run-fleet.ps1
 ```
 
@@ -35,6 +33,36 @@ Dispatch only:
 ```powershell
 .\run.ps1
 ```
+
+Driver cabin only (same app, driver mode):
+
+```powershell
+.\run-driver.ps1
+```
+
+---
+
+## Repository layout (single package tree)
+
+This repo **is** the platform. There is no nested duplicate app folder.
+
+```
+.
+├── app.py                 # Streamlit dispatch + Driver View entry
+├── lp_helpers/            # Authoritative Python package (DB, UI, GPS, driver cabin…)
+├── web/                   # Marketing site + PWA assets
+├── tests/                 # pytest suite
+├── scripts/               # debug + local verify
+├── deploy/                # production nginx / SSL / tunnel scripts
+├── run.ps1                # dispatch (creates .venv, installs deps)
+├── run-fleet.ps1          # website + dispatch
+└── run-driver.ps1         # driver entry URL helper
+```
+
+Import rule: **always** `from lp_helpers.…` against root `lp_helpers/`.  
+Do not reintroduce a nested `lawson-freight-platform/` copy of the app.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for long-term structure notes.
 
 ---
 
@@ -75,7 +103,7 @@ auto_send_new_load = "1"
 ## Production Deploy (Docker + HTTPS)
 
 ```powershell
-cd lawson-freight-platform
+# From this repo root
 copy .env.example .env
 # Edit .env: LP_APP_URL=https://dispatch.lpfreight.com, LP_WEB_MODE=1
 .\deploy\production.ps1
@@ -89,6 +117,12 @@ Verify:
 
 Stack: **nginx** (website + `/app/` proxy) · **Streamlit** · **certbot** · optional Cloudflare tunnel
 
+Or Docker from repo root:
+
+```powershell
+.\deploy.ps1
+```
+
 ---
 
 ## Verify Locally
@@ -98,7 +132,13 @@ Stack: **nginx** (website + `/app/` proxy) · **Streamlit** · **certbot** · op
 .\scripts\verify_fleet_local.ps1
 ```
 
-Runs pytest + health checks for website, dispatch, and driver entry.
+Runs package integrity checks + pytest + health checks for website, dispatch, and driver entry.
+
+Quick module smoke test:
+
+```powershell
+python scripts/debug_platform.py
+```
 
 ---
 

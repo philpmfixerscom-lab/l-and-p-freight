@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
+# Single package root — website + dispatch from this repo.
 $repoRoot = $PSScriptRoot
-$platformRoot = Join-Path $repoRoot "lawson-freight-platform"
 $venvPath = Join-Path $repoRoot ".venv"
 $pythonExe = Join-Path $venvPath "Scripts\python.exe"
 
@@ -26,7 +26,7 @@ $env:LP_WEB_MODE = "0"
 Write-Host "=== L & P Fleet Stack ===" -ForegroundColor Cyan
 Write-Host "Starting dispatch app on http://127.0.0.1:$appPort ..." -ForegroundColor Green
 Start-Process -FilePath $pythonExe -ArgumentList @(
-    "-m", "streamlit", "run", (Join-Path $platformRoot "app.py"),
+    "-m", "streamlit", "run", (Join-Path $repoRoot "app.py"),
     "--server.address", "127.0.0.1",
     "--server.port", $appPort,
     "--server.headless", "true"
@@ -51,5 +51,5 @@ Write-Host "  Driver App:   http://127.0.0.1:$appPort/?view=driver" -ForegroundC
 Write-Host ""
 Write-Host "Press Ctrl+C to stop the website server (dispatch keeps running)." -ForegroundColor Gray
 
-Set-Location -LiteralPath (Join-Path $platformRoot "web")
+Set-Location -LiteralPath (Join-Path $repoRoot "web")
 & $pythonExe -m http.server $webPort --bind 127.0.0.1

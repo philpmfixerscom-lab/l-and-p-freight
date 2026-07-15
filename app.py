@@ -1285,7 +1285,7 @@ def render_sidebar() -> None:
         render_lawson_sidebar_extras()
         st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
         render_day_night_toggle()
-        if st.button("🚛 Driver View", use_container_width=True):
+        if st.button("🚛 Driver View (Beta)", use_container_width=True):
             st.session_state.view_mode = "driver"
             st.rerun()
         st.caption(TAGLINE)
@@ -2686,6 +2686,81 @@ def _exit_driver_view() -> None:
         pass
 
 
+def safe_render_driver_view() -> None:
+    """Safe wrapper — full cabin UI when healthy; recovery UI if helper import/runtime fails."""
+    try:
+        from lp_helpers.driver_mobile import render_driver_app
+
+        def _traccar_status_for_driver() -> dict[str, Any] | None:
+            url, token, email, password = _traccar_connection_params()
+            status, fleet, _devices = _cached_traccar_fleet(url, token, email, password)
+            if status.get("ok"):
+                return get_traccar_live().get_live_status(None)
+            return None
+
+        render_driver_app(
+            get_connection=get_connection,
+            get_active_owner=get_active_owner,
+            truck_label=TRUCK_LABEL,
+            get_traccar_status=_traccar_status_for_driver,
+            format_sms=format_sms,
+            log_sms_event=log_sms_event,
+            on_emergency=dispatch_emergency,
+            on_exit=_exit_driver_view,
+        )
+    except Exception as exc:
+        st.error("Driver View is temporarily unavailable.")
+        st.caption("Switch back to Dispatch view for now. Helper detail (for support):")
+        st.code(f"{type(exc).__name__}: {exc}")
+        if st.button("Return to Dispatch View", type="primary"):
+            _exit_driver_view()
+            st.rerun()
+
+
+def render_sidebar_brand(
+    carrier: str = "L & P Dispatch",
+    lane_origin: str = "Spruce Pine, NC",
+    lane_dest: str = "Central Georgia (Kohler area)",
+    trailer: str = "39ft Frameless End-Dump",
+) -> None:
+    """Safe fallback sidebar brand header — prevents NameError after merges/updates."""
+    try:
+        st.sidebar.markdown(f"### 🚛 {carrier}")
+        st.sidebar.caption(f"{lane_origin} → {lane_dest} · {trailer} · Phillip & Lawson")
+        st.sidebar.caption("Owner-Operator Command Center | Spruce Pine Strong")
+    except Exception:
+        pass
+
+
+def render_day_night_toggle():
+    """Working day/night toggle with visual effect."""
+    if "night_mode" not in st.session_state:
+        st.session_state.night_mode = True
+
+    toggle = st.sidebar.toggle(
+        "🌙 Night Mode (High Contrast)",
+        value=st.session_state.night_mode,
+        key="night_mode_toggle"
+    )
+
+    if toggle != st.session_state.night_mode:
+        st.session_state.night_mode = toggle
+        st.rerun()
+
+    # Apply dark mode CSS when enabled
+    if st.session_state.night_mode:
+        st.markdown(
+            """
+            <style>
+            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; }
+            .stSidebar { background-color: #1e2937 !important; }
+            div[data-testid="stMetric"] { background-color: #1e2937 !important; border: 1px solid #475569; }
+            .stButton>button { background-color: #1e40af !important; color: white !important; }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
 def main() -> None:
     auto_backup_db()
 
@@ -2732,7 +2807,7 @@ def main() -> None:
             render_lawson_sidebar_extras()
             st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
             render_day_night_toggle()
-            if st.button("🚛 Driver View", use_container_width=True):
+            if st.button("🚛 Driver View (Beta)", use_container_width=True):
                 st.session_state.view_mode = "driver"
                 st.rerun()
             st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")
@@ -2746,25 +2821,7 @@ def main() -> None:
         init_database()
 
     if _driver_view_requested():
-        from lp_helpers.driver_mobile import render_driver_app
-
-        def _traccar_fix_for_driver() -> dict[str, Any] | None:
-            url, token, email, password = _traccar_connection_params()
-            status, fleet, _devices = _cached_traccar_fleet(url, token, email, password)
-            if status.get("ok"):
-                return get_traccar_live().get_live_fix(None)
-            return None
-
-        render_driver_app(
-            get_connection=get_connection,
-            get_active_owner=get_active_owner,
-            truck_label=TRUCK_LABEL,
-            get_traccar_fix=_traccar_fix_for_driver,
-            format_sms=format_sms,
-            log_sms_event=log_sms_event,
-            on_emergency=dispatch_emergency,
-            on_exit=_exit_driver_view,
-        )
+        safe_render_driver_view()
         return
 
     st.title(f"🚛 {PLATFORM_TITLE}")

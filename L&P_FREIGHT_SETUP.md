@@ -1,15 +1,21 @@
-# L & P Dispatch v3.0 — Freight OS Setup
+# L & P Dispatch — Freight OS Setup
 
 ## Run (Windows PowerShell)
 
 ```powershell
-cd "Projects/L & P Freight"
+cd "Projects/L & P Freight/lawson-freight-platform"
 .\run.ps1
 ```
 
-Opens **http://localhost:8501** — creates `.venv`, installs deps, starts Streamlit.
+Opens **http://127.0.0.1:8502** — creates `.venv`, installs deps, starts Streamlit.
 
-Port busy? Edit `run.ps1` → change `--server.port 8501` to `8502`.
+Fleet (website + dispatch):
+
+```powershell
+.\run-fleet.ps1
+```
+
+Driver cabin: **http://127.0.0.1:8502/?view=driver** or `.\run-driver.ps1`
 
 ## First-Time Demo (60 seconds)
 
@@ -22,7 +28,7 @@ Port busy? Edit `run.ps1` → change `--server.port 8501` to `8502`.
 
 | File | Purpose |
 |------|---------|
-| `lp_dispatch.db` | All operational SQLite records |
+| `lp_dispatch.db` | All operational SQLite records (repo root) |
 | `attachments/` | Voice memos, BOLs, document scans |
 | `lawson_freight.db` / `lp_freight.db` | Legacy — auto-merged on first run |
 
@@ -31,9 +37,10 @@ Port busy? Edit `run.ps1` → change `--server.port 8501` to `8502`.
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m streamlit run app.py
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.port 8502
 ```
 
-## Full docs
+## Package layout
 
-See **README.md** for vision, feature map, and privacy notes.
+Single tree only — `app.py` + `lp_helpers/` at repo root.  
+See **ARCHITECTURE.md** and **README.md**.

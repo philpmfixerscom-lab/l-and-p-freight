@@ -1,11 +1,13 @@
 $ErrorActionPreference = "Stop"
 
-$platformRoot = Join-Path $PSScriptRoot "lawson-freight-platform"
+# Single package root — this repo IS the platform (no nested copy).
+$platformRoot = $PSScriptRoot
 Set-Location -LiteralPath $platformRoot
 
-$venvPath = Join-Path $PSScriptRoot ".venv"
+$venvPath = Join-Path $platformRoot ".venv"
 $pythonExe = Join-Path $venvPath "Scripts\python.exe"
 $preferredPython = @("3.12", "3.13", "3.11", "3")
+
 
 function Get-PythonLauncherArg {
     foreach ($version in $preferredPython) {
@@ -47,17 +49,14 @@ Write-Host "Installing/updating dependencies..." -ForegroundColor Cyan
 & $pythonExe -m pip install -r (Join-Path $platformRoot "requirements.txt")
 
 # Kill stale instance on 8502 (duplicate listeners cause 404 in browser)
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = "Continue"
 Get-NetTCPConnection -LocalPort 8502 -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 1
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = "Stop"
 
 $appUrl = "http://127.0.0.1:8502"
-<<<<<<< HEAD
-Write-Host ('Starting L and P Dispatch — Lawson Freight at ' + $appUrl) -ForegroundColor Green
-=======
-Write-Host ('Starting L and P Dispatch — Lawson Freight Platform at ' + $appUrl) -ForegroundColor Green
->>>>>>> ab68846242f4f5269a6ae84320e7ed9685bb4e23
-Write-Host ('Open ' + $appUrl + ' in your browser. If you see 404, wait 5 sec and refresh.') -ForegroundColor Yellow
-& $pythonExe -m streamlit run (Join-Path $platformRoot 'app.py') --server.address 127.0.0.1 --server.port 8502 --server.headless false
+Write-Host ("Starting L and P Dispatch — Lawson Freight Platform at " + $appUrl) -ForegroundColor Green
+Write-Host ("Open " + $appUrl + " in your browser. If you see 404, wait 5 sec and refresh.") -ForegroundColor Yellow
+Write-Host ("Driver View: " + $appUrl + "/?view=driver") -ForegroundColor Yellow
+& $pythonExe -m streamlit run (Join-Path $platformRoot "app.py") --server.address 127.0.0.1 --server.port 8502 --server.headless false

@@ -12,6 +12,44 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Authoritative package modules — must exist as .py sources (not pycache-only).
+REQUIRED_LP_HELPERS = (
+    "__init__.py",
+    "analytics_dashboard.py",
+    "bol_export.py",
+    "database.py",
+    "driver_mobile.py",
+    "emergency_alerts.py",
+    "engines.py",
+    "followup_templates.py",
+    "lawson_profile.py",
+    "load_board.py",
+    "mobile_web.py",
+    "pages.py",
+    "traccar_live.py",
+    "ui_components.py",
+    "ui_theme.py",
+)
+
+
+def test_single_package_tree_and_helper_sources():
+    """Guard against nested-duplicate regressions and missing lp_helpers sources."""
+    helpers = ROOT / "lp_helpers"
+    assert helpers.is_dir(), "lp_helpers/ package missing at repo root"
+
+    missing = [name for name in REQUIRED_LP_HELPERS if not (helpers / name).is_file()]
+    assert not missing, f"Missing lp_helpers sources: {missing}"
+
+    nested_app = ROOT / "lawson-freight-platform" / "app.py"
+    assert not nested_app.exists(), (
+        "Nested lawson-freight-platform/app.py found — keep a single package tree at repo root"
+    )
+
+    from lp_helpers.driver_mobile import fetch_active_load, render_driver_app
+
+    assert callable(fetch_active_load)
+    assert callable(render_driver_app)
+
 
 def test_lawson_profile_imports():
     from lp_helpers.lawson_profile import (

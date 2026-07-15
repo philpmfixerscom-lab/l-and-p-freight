@@ -1,3 +1,3 @@
 $ErrorActionPreference = "Stop"
-$repoRoot = Split-Path $PSScriptRoot -Parent
-& (Join-Path $repoRoot "run-fleet.ps1")
+# Website + dispatch fleet stack
+& (Join-Path $PSScriptRoot "run-fleet.ps1")
