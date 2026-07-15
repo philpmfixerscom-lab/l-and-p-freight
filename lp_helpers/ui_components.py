@@ -55,23 +55,24 @@ def is_night_mode() -> bool:
     return bool(st.session_state.night_mode)
 
 
-def render_day_night_toggle(*, key: str = "night_mode_toggle_v2") -> None:
-    """Reliable Day/Night toggle with forced theme application + DB persist."""
+def render_day_night_toggle(*, key: str = "night_mode_toggle") -> None:
+    """Reliable Day/Night mode toggle with immediate theme update."""
     if "night_mode" not in st.session_state:
         st.session_state.night_mode = get_setting(NIGHT_MODE_KEY, "1") == "1"
 
-    current = st.sidebar.toggle(
-        "Night Mode" if st.session_state.night_mode else "Day Mode",
+    toggle_label = "Night Mode" if st.session_state.night_mode else "Day Mode"
+
+    toggle = st.sidebar.toggle(
+        toggle_label,
         value=st.session_state.night_mode,
         key=key,
     )
 
-    if current != st.session_state.night_mode:
-        st.session_state.night_mode = current
-        set_setting(NIGHT_MODE_KEY, "1" if current else "0")
+    if toggle != st.session_state.night_mode:
+        st.session_state.night_mode = toggle
+        set_setting(NIGHT_MODE_KEY, "1" if toggle else "0")
         st.rerun()
 
-    # Theme applied here and again at end of main() so every widget stays high-contrast
     apply_platform_theme(bool(st.session_state.night_mode))
 
 
@@ -130,6 +131,11 @@ def is_demo_mode() -> bool:
 
 def get_owner_role() -> str:
     return get_setting(OWNER_ROLE_KEY, "Phillip")
+
+
+def set_owner_role(role: str) -> None:
+    """Persist owner role (Phillip / Lawson)."""
+    set_setting(OWNER_ROLE_KEY, str(role))
 
 
 def privacy_banner(*, compact: bool = False) -> None:
