@@ -874,8 +874,9 @@ def init_database() -> None:
     conn.close()
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_leads() -> pd.DataFrame:
+    """Cached leads (60s) — use clear_data_caches() after writes."""
     try:
         with closing(get_connection()) as conn:
             df = pd.read_sql_query(
@@ -894,8 +895,9 @@ def fetch_leads() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def fetch_loads() -> pd.DataFrame:
+    """Cached loads (45s) — use clear_data_caches() after writes."""
     try:
         with closing(get_connection()) as conn:
             return pd.read_sql_query(
@@ -912,18 +914,23 @@ def fetch_loads() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def fetch_lane_rates() -> pd.DataFrame:
-    conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT * FROM lane_rates ORDER BY origin, destination, commodity",
-        conn,
-    )
-    conn.close()
-    return df
+    """Cached lane rates (2 min)."""
+    try:
+        with closing(get_connection()) as conn:
+            return pd.read_sql_query(
+                "SELECT * FROM lane_rates ORDER BY origin, destination, commodity",
+                conn,
+            )
+    except Exception as exc:
+        log.exception("fetch_lane_rates failed")
+        return pd.DataFrame()
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_call_logs() -> pd.DataFrame:
+    """Cached recent call logs (60s)."""
     try:
         with closing(get_connection()) as conn:
             return pd.read_sql_query(
@@ -939,6 +946,112 @@ def fetch_call_logs() -> pd.DataFrame:
     except Exception as exc:
         log.exception("fetch_call_logs failed")
         return pd.DataFrame()
+
+
+def clear_data_caches() -> None:
+    """Invalidate cached tables after inserts/updates so UI stays fresh."""
+    try:
+        fetch_leads.clear()
+        fetch_loads.clear()
+        fetch_call_logs.clear()
+        fetch_lane_rates.clear()
+    except Exception:
+        pass
+
+
+# Friendly aliases (docs / future call sites)
+fetch_leads_cached = fetch_leads
+fetch_loads_cached = fetch_loads
+
+
+def run_platform_health_check() -> None:
+    """In-app diagnostics: DB, theme, nav, driver module, caches."""
+    st.subheader("Platform Health Check")
+    st.caption("Quick diagnostics for Dispatch stability and data access.")
+
+    checks: list[tuple[str, str]] = []
+
+    # 1) Database
+    try:
+        with closing(get_connection()) as conn:
+            conn.execute("SELECT 1")
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        required = {"leads", "loads"}
+        missing = required - tables
+        if missing:
+            checks.append(("Database Connection", f"WARN missing tables: {', '.join(sorted(missing))}"))
+        else:
+            checks.append(("Database Connection", "OK"))
+    except Exception as exc:
+        checks.append(("Database Connection", f"FAIL {exc}"))
+
+    # 2) Theme
+    if "night_mode" in st.session_state:
+        mode = "Night" if st.session_state.night_mode else "Day"
+        checks.append(("Theme System", f"OK ({mode} mode)"))
+    else:
+        checks.append(("Theme System", "WARN not initialized"))
+
+    # 3) Navigation
+    nav_ok = callable(globals().get("navigate_to_tab")) and callable(
+        globals().get("render_main_nav")
+    )
+    checks.append(("Navigation Function", "OK" if nav_ok else "FAIL Missing"))
+
+    # 4) Driver module
+    try:
+        from lp_helpers.driver_mobile import render_driver_app
+
+        checks.append(
+            ("Driver Module", "OK" if callable(render_driver_app) else "FAIL not callable")
+        )
+    except Exception as exc:
+        checks.append(("Driver Module", f"FAIL {exc}"))
+
+    # 5) Platform theme helper
+    try:
+        from lp_helpers.ui_theme import apply_platform_theme as _theme
+
+        checks.append(("Accessibility Theme", "OK" if callable(_theme) else "FAIL"))
+    except Exception as exc:
+        checks.append(("Accessibility Theme", f"FAIL {exc}"))
+
+    # 6) Cached fetchers
+    try:
+        _ = fetch_leads()
+        _ = fetch_loads()
+        checks.append(("Cached Data Fetch", "OK (leads + loads)"))
+    except Exception as exc:
+        checks.append(("Cached Data Fetch", f"FAIL {exc}"))
+
+    for name, status in checks:
+        if status.startswith("OK"):
+            st.success(f"**{name}:** {status}")
+        elif status.startswith("WARN"):
+            st.warning(f"**{name}:** {status}")
+        else:
+            st.error(f"**{name}:** {status}")
+
+    st.divider()
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("Force Refresh All Cached Data", use_container_width=True, key="health_clear_cache"):
+            clear_data_caches()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.success("Cache cleared. Refreshing...")
+            st.rerun()
+    with col_b:
+        if st.button("Open Driver View (Beta)", use_container_width=True, key="health_open_driver"):
+            st.session_state.view_mode = "driver"
+            st.rerun()
 
 
 def compute_dashboard_metrics(
@@ -1634,8 +1747,7 @@ def render_leads_crm_tab() -> None:
                     (lead_id, call_type, call_notes, outcome),
                 )
                 conn.commit()
-            fetch_leads.clear()
-            fetch_call_logs.clear()
+            clear_data_caches()
             st.success(f"Updated {lead_row['company']} — status: {new_status}")
             st.rerun()
         except sqlite3.Error as exc:
@@ -1851,7 +1963,7 @@ def render_load_logger_tab() -> None:
                 log.exception("Save load failed")
                 st.error(f"Could not save load: {exc}")
                 return
-            fetch_loads.clear()
+            clear_data_caches()
             saved_load = {
                 "bol_number": bol,
                 "shipper": shipper.strip(),
@@ -2431,6 +2543,9 @@ def render_alerts_tab() -> None:
     _render_emergency_controls(key_prefix="alert_em")
 
     st.divider()
+    with st.expander("Platform Health Check", expanded=False):
+        run_platform_health_check()
+    st.divider()
 
     tw_ok = all([
         get_secret("twilio", "account_sid"),
@@ -2778,18 +2893,19 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         st.markdown(
             """
             <style>
-            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; }
+            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; font-size: 17px !important; }
             section[data-testid="stSidebar"] { background-color: #1e2937 !important; }
-            div[data-testid="stMetric"] {
-                background-color: #1e2937 !important; border: 2px solid #475569 !important;
-                color: #f1f5f9 !important;
+            h1, h2, h3, h4, h5, p, label, span { color: #f1f5f9 !important; font-size: 1.05rem !important; }
+            div[data-testid="stMetric"] label { color: #94a3b8 !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+                font-size: 1.65rem !important; font-weight: 800 !important; color: #bae6fd !important;
             }
             .stButton>button, .stDownloadButton>button {
                 background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
-                color: white !important; font-weight: 700 !important;
-                border: 2px solid #60a5fa !important;
+                color: white !important; font-weight: 700 !important; font-size: 1rem !important;
+                border: 2px solid #60a5fa !important; min-height: 48px !important;
             }
-            h1, h2, h3, h4, h5, p, label, span { color: #f1f5f9 !important; }
+            .stButton>button:focus-visible { outline: 3px solid #fbbf24 !important; outline-offset: 2px !important; }
             </style>
             """,
             unsafe_allow_html=True,
@@ -2798,17 +2914,19 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         st.markdown(
             """
             <style>
-            .stApp { background-color: #f8fafc !important; color: #0f172a !important; }
+            .stApp { background-color: #f8fafc !important; color: #0f172a !important; font-size: 17px !important; }
             section[data-testid="stSidebar"] { background-color: #e2e8f0 !important; }
-            div[data-testid="stMetric"] {
-                background-color: white !important; border: 2px solid #cbd5e1 !important;
-                color: #0f172a !important;
+            h1, h2, h3, h4, h5, p, label, span { color: #0f172a !important; font-size: 1.05rem !important; }
+            div[data-testid="stMetric"] label { color: #475569 !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+                font-size: 1.65rem !important; font-weight: 800 !important; color: #0c4a6e !important;
             }
             .stButton>button, .stDownloadButton>button {
                 background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
-                color: white !important; font-weight: 700 !important;
+                color: white !important; font-weight: 700 !important; font-size: 1rem !important;
+                min-height: 48px !important;
             }
-            h1, h2, h3, h4, h5, p, label, span { color: #0f172a !important; }
+            .stButton>button:focus-visible { outline: 3px solid #b45309 !important; outline-offset: 2px !important; }
             </style>
             """,
             unsafe_allow_html=True,
@@ -2917,6 +3035,11 @@ def main() -> None:
             render_day_night_toggle()
             if st.button("Driver View (Beta)", use_container_width=True, key="driver_view_btn"):
                 st.session_state.view_mode = "driver"
+                st.rerun()
+            if st.button("Platform Health Check", use_container_width=True, key="sidebar_health_btn"):
+                st.session_state.active_tab = "Alerts"
+                st.session_state.main_nav_radio = "Alerts"
+                st.session_state.nav_hint = "Opened **Alerts** — expand Platform Health Check"
                 st.rerun()
             st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")
         night_mode = is_night_mode()

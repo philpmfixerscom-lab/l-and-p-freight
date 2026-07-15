@@ -706,7 +706,14 @@ def inject_ui_css(night_mode: bool = False) -> None:
 
 
 def apply_platform_theme(night_mode: bool | None = None) -> None:
-    """High-contrast theme for Day and Night — high pop, readable text, consistent buttons."""
+    """High-contrast, trucker-friendly theme (WCAG 2.1 AA+ oriented).
+
+    Targets:
+    - Normal text ~7:1+ (dark slate on off-white / near-white on navy)
+    - Large metric values bold and high-contrast
+    - Visible focus rings on interactive controls
+    - Base font 17px; touch-friendly button/input min heights
+    """
     if night_mode is None:
         if "night_mode" not in st.session_state:
             st.session_state.night_mode = True
@@ -719,10 +726,20 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         st.markdown(
             """
             <style>
+            :root {
+                --text-main: #f1f5f9;
+                --text-muted: #cbd5e1;
+                --bg-card: #1e2937;
+                --border: #64748b;
+                --bg-app: #0b1120;
+                --accent: #7dd3fc;
+                --focus: #fbbf24;
+            }
             html, body, .stApp, [data-testid="stAppViewContainer"],
             [data-testid="stHeader"], .main, .block-container {
-                background-color: #0b1120 !important;
-                color: #f1f5f9 !important;
+                background-color: var(--bg-app) !important;
+                color: var(--text-main) !important;
+                font-size: 17px !important;
             }
             section[data-testid="stSidebar"],
             section[data-testid="stSidebar"] > div,
@@ -733,73 +750,100 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
             section[data-testid="stSidebar"] label,
             section[data-testid="stSidebar"] p,
             section[data-testid="stSidebar"] span {
-                color: #f1f5f9 !important;
+                color: var(--text-main) !important;
+            }
+            h1 { color: var(--text-main) !important; font-size: 1.9rem !important; font-weight: 800 !important; }
+            h2 { color: var(--text-main) !important; font-size: 1.5rem !important; font-weight: 800 !important; }
+            h3, h4, h5 { color: var(--text-main) !important; font-size: 1.2rem !important; font-weight: 700 !important; }
+            .stMarkdown, .stMarkdown p, p, label, span {
+                color: var(--text-main) !important;
+                font-size: 1.05rem !important;
+                line-height: 1.5 !important;
+            }
+            .stCaption, [data-testid="stCaptionContainer"] {
+                color: var(--text-muted) !important;
+                font-size: 0.95rem !important;
             }
             div[data-testid="stMetric"] {
-                background-color: #1e2937 !important;
-                border: 2px solid #475569 !important;
+                background-color: var(--bg-card) !important;
+                border: 2px solid var(--border) !important;
                 border-radius: 12px !important;
-                padding: 0.65rem 0.85rem !important;
-                color: #f1f5f9 !important;
+                padding: 0.75rem 0.9rem !important;
             }
-            div[data-testid="stMetric"] label { color: #94a3b8 !important; font-weight: 600 !important; }
+            div[data-testid="stMetric"] label {
+                font-size: 0.95rem !important;
+                color: var(--text-muted) !important;
+                font-weight: 600 !important;
+            }
             div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-                color: #f8fafc !important; font-weight: 800 !important;
+                font-size: 1.65rem !important;
+                font-weight: 800 !important;
+                color: var(--accent) !important;
             }
             .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
                 background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
                 color: #ffffff !important;
                 font-weight: 700 !important;
+                font-size: 1.05rem !important;
+                padding: 0.7rem 1.1rem !important;
+                min-height: 48px !important;
                 border: 2px solid #60a5fa !important;
                 border-radius: 10px !important;
             }
             .stButton > button:hover, .stDownloadButton > button:hover {
                 filter: brightness(1.12) !important;
-                border-color: #93c5fd !important;
             }
-            .stTabs [aria-selected="true"],
-            div[role="radiogroup"] label[data-checked="true"],
-            div[role="radiogroup"] label:has(input:checked) {
-                color: #bae6fd !important;
-                border-bottom: 4px solid #bae6fd !important;
-                font-weight: 700 !important;
+            .stButton > button:focus-visible,
+            .stDownloadButton > button:focus-visible,
+            .stFormSubmitButton > button:focus-visible,
+            .stTextInput input:focus,
+            .stNumberInput input:focus,
+            .stTextArea textarea:focus,
+            .stSelectbox > div > div:focus-within,
+            a:focus-visible {
+                outline: 3px solid var(--focus) !important;
+                outline-offset: 2px !important;
+                box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35) !important;
             }
-            h1, h2, h3, h4, h5, .stMarkdown, .stMarkdown p, .stCaption, label, span, p {
-                color: #f1f5f9 !important;
-            }
-            .stCaption, [data-testid="stCaptionContainer"] { color: #94a3b8 !important; }
             .stTextInput input, .stNumberInput input, .stTextArea textarea,
             .stSelectbox > div > div, .stMultiSelect > div > div,
             [data-baseweb="select"] > div {
-                background-color: #1e2937 !important;
-                color: #f1f5f9 !important;
-                border-color: #475569 !important;
+                background-color: var(--bg-card) !important;
+                color: var(--text-main) !important;
+                border-color: var(--border) !important;
+                font-size: 1.05rem !important;
+                min-height: 44px !important;
             }
             .stDataFrame, [data-testid="stDataFrame"] {
-                background-color: #1e2937 !important;
-                color: #f1f5f9 !important;
-                border: 1px solid #475569 !important;
+                background-color: var(--bg-card) !important;
+                color: var(--text-main) !important;
+                border: 1px solid var(--border) !important;
                 border-radius: 10px !important;
+                font-size: 1rem !important;
             }
             .stExpander, [data-testid="stExpander"] {
-                background-color: #1e2937 !important;
-                border: 1px solid #475569 !important;
+                background-color: var(--bg-card) !important;
+                border: 1px solid var(--border) !important;
                 border-radius: 10px !important;
             }
-            hr { border-color: #334155 !important; }
-            /* Controlled main nav radio pills */
+            hr { border-color: #475569 !important; }
             div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label {
-                background: #1e2937 !important;
-                border: 1px solid #475569 !important;
+                background: var(--bg-card) !important;
+                border: 2px solid var(--border) !important;
                 border-radius: 999px !important;
-                padding: 0.35rem 0.85rem !important;
-                color: #e2e8f0 !important;
-                font-weight: 600 !important;
+                padding: 0.5rem 1rem !important;
+                color: var(--text-main) !important;
+                font-weight: 700 !important;
+                font-size: 0.98rem !important;
             }
             div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:has(input:checked) {
                 background: #1e40af !important;
-                border-color: #60a5fa !important;
+                border-color: #7dd3fc !important;
                 color: #ffffff !important;
+            }
+            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:focus-within {
+                outline: 3px solid var(--focus) !important;
+                outline-offset: 2px !important;
             }
             </style>
             """,
@@ -809,10 +853,20 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         st.markdown(
             """
             <style>
+            :root {
+                --text-main: #0f172a;
+                --text-muted: #334155;
+                --bg-card: #ffffff;
+                --border: #94a3b8;
+                --bg-app: #f1f5f9;
+                --accent: #0c4a6e;
+                --focus: #b45309;
+            }
             html, body, .stApp, [data-testid="stAppViewContainer"],
             [data-testid="stHeader"], .main, .block-container {
-                background-color: #f8fafc !important;
-                color: #0f172a !important;
+                background-color: var(--bg-app) !important;
+                color: var(--text-main) !important;
+                font-size: 17px !important;
             }
             section[data-testid="stSidebar"],
             section[data-testid="stSidebar"] > div,
@@ -823,65 +877,101 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
             section[data-testid="stSidebar"] label,
             section[data-testid="stSidebar"] p,
             section[data-testid="stSidebar"] span {
-                color: #0f172a !important;
+                color: var(--text-main) !important;
+            }
+            h1 { color: var(--text-main) !important; font-size: 1.9rem !important; font-weight: 800 !important; }
+            h2 { color: var(--text-main) !important; font-size: 1.5rem !important; font-weight: 800 !important; }
+            h3, h4, h5 { color: var(--text-main) !important; font-size: 1.2rem !important; font-weight: 700 !important; }
+            .stMarkdown, .stMarkdown p, p, label, span {
+                color: var(--text-main) !important;
+                font-size: 1.05rem !important;
+                line-height: 1.5 !important;
+            }
+            .stCaption, [data-testid="stCaptionContainer"] {
+                color: var(--text-muted) !important;
+                font-size: 0.95rem !important;
             }
             div[data-testid="stMetric"] {
-                background-color: #ffffff !important;
-                border: 2px solid #cbd5e1 !important;
+                background-color: var(--bg-card) !important;
+                border: 2px solid var(--border) !important;
                 border-radius: 12px !important;
-                padding: 0.65rem 0.85rem !important;
-                color: #0f172a !important;
-                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+                padding: 0.75rem 0.9rem !important;
+                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1) !important;
             }
-            div[data-testid="stMetric"] label { color: #475569 !important; font-weight: 600 !important; }
+            div[data-testid="stMetric"] label {
+                font-size: 0.95rem !important;
+                color: var(--text-muted) !important;
+                font-weight: 600 !important;
+            }
             div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-                color: #0f172a !important; font-weight: 800 !important;
+                font-size: 1.65rem !important;
+                font-weight: 800 !important;
+                color: var(--accent) !important;
             }
             .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
-                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                background: linear-gradient(135deg, #1e3a8a, #2563eb) !important;
                 color: #ffffff !important;
                 font-weight: 700 !important;
-                border: 2px solid #2563eb !important;
+                font-size: 1.05rem !important;
+                padding: 0.7rem 1.1rem !important;
+                min-height: 48px !important;
+                border: 2px solid #1d4ed8 !important;
                 border-radius: 10px !important;
             }
             .stButton > button:hover, .stDownloadButton > button:hover {
-                filter: brightness(1.08) !important;
+                filter: brightness(1.06) !important;
             }
-            h1, h2, h3, h4, h5, .stMarkdown, .stMarkdown p, label, span, p {
-                color: #0f172a !important;
+            .stButton > button:focus-visible,
+            .stDownloadButton > button:focus-visible,
+            .stFormSubmitButton > button:focus-visible,
+            .stTextInput input:focus,
+            .stNumberInput input:focus,
+            .stTextArea textarea:focus,
+            .stSelectbox > div > div:focus-within,
+            a:focus-visible {
+                outline: 3px solid var(--focus) !important;
+                outline-offset: 2px !important;
+                box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.3) !important;
             }
-            .stCaption, [data-testid="stCaptionContainer"] { color: #475569 !important; }
             .stTextInput input, .stNumberInput input, .stTextArea textarea,
             .stSelectbox > div > div, .stMultiSelect > div > div,
             [data-baseweb="select"] > div {
-                background-color: #ffffff !important;
-                color: #0f172a !important;
-                border-color: #cbd5e1 !important;
+                background-color: var(--bg-card) !important;
+                color: var(--text-main) !important;
+                border-color: var(--border) !important;
+                font-size: 1.05rem !important;
+                min-height: 44px !important;
             }
             .stDataFrame, [data-testid="stDataFrame"] {
-                background-color: #ffffff !important;
-                color: #0f172a !important;
-                border: 1px solid #cbd5e1 !important;
+                background-color: var(--bg-card) !important;
+                color: var(--text-main) !important;
+                border: 1px solid var(--border) !important;
                 border-radius: 10px !important;
+                font-size: 1rem !important;
             }
             .stExpander, [data-testid="stExpander"] {
-                background-color: #ffffff !important;
-                border: 1px solid #cbd5e1 !important;
+                background-color: var(--bg-card) !important;
+                border: 1px solid var(--border) !important;
                 border-radius: 10px !important;
             }
-            hr { border-color: #cbd5e1 !important; }
+            hr { border-color: #94a3b8 !important; }
             div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label {
-                background: #ffffff !important;
-                border: 1px solid #cbd5e1 !important;
+                background: var(--bg-card) !important;
+                border: 2px solid var(--border) !important;
                 border-radius: 999px !important;
-                padding: 0.35rem 0.85rem !important;
-                color: #0f172a !important;
-                font-weight: 600 !important;
+                padding: 0.5rem 1rem !important;
+                color: var(--text-main) !important;
+                font-weight: 700 !important;
+                font-size: 0.98rem !important;
             }
             div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:has(input:checked) {
-                background: #1e40af !important;
-                border-color: #2563eb !important;
+                background: #1e3a8a !important;
+                border-color: #1d4ed8 !important;
                 color: #ffffff !important;
+            }
+            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:focus-within {
+                outline: 3px solid var(--focus) !important;
+                outline-offset: 2px !important;
             }
             </style>
             """,
