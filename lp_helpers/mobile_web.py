@@ -43,6 +43,14 @@ def app_start_url() -> str:
     return f"{base}/"
 
 
+def driver_start_url() -> str:
+    """Driver view launch URL."""
+    base = app_start_url()
+    if "?" in base:
+        return f"{base}&view=driver"
+    return f"{base}?view=driver"
+
+
 def _manifest_json(base_url: str) -> str:
     start = app_start_url()
     manifest = {

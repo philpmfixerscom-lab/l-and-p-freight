@@ -12,7 +12,7 @@ import streamlit as st
 # Placeholder market intel — refresh button updates timestamp; future: BulkLoads API scrape
 NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Spruce Pine, NC → Macon, GA",
         "commodity": "Feldspar",
         "rate": "$46–52/ton",
@@ -21,7 +21,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "End-dump preferred · 22–24t loads",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Spruce Pine, NC → Augusta, GA",
         "commodity": "Mica",
         "rate": "$48/ton",
@@ -30,7 +30,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "Lined trailer required · weekly volume",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Marion, NC → Central GA",
         "commodity": "Clay",
         "rate": "$44–47/ton",
@@ -39,7 +39,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "Multiple pickups · minimize deadhead on return",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Spruce Pine, NC → Kohler area, GA",
         "commodity": "Spar / Aggregate",
         "rate": "$50/ton",
@@ -48,7 +48,7 @@ NC_GA_MARKET_INTEL: list[dict[str, Any]] = [
         "notes": "Primary L & P lane · 285 loaded mi baseline",
     },
     {
-        "source": "BulkLoads (placeholder)",
+        "source": "BulkLoads",
         "lane": "Bakersville, NC → Atlanta, GA",
         "commodity": "Rock",
         "rate": "$42/ton",
@@ -94,6 +94,47 @@ def insert_opportunity(
         (source, lane, commodity, rate, contact, notes),
     )
     return cur.lastrowid
+
+
+def upsert_market_intel(
+    conn,
+    *,
+    lane: str,
+    commodity: str,
+    rate: str,
+    contact: str,
+    notes: str = "",
+    source: str = "bulkloads_intel",
+) -> bool:
+    """Insert intel listing only if same lane+commodity+source not already open."""
+    existing = conn.execute(
+        """
+        SELECT id FROM opportunities
+        WHERE source = ? AND lane = ? AND commodity = ? AND status = 'Open'
+        LIMIT 1
+        """,
+        (source, lane, commodity),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE opportunities
+            SET rate = ?, contact = ?, notes = ?, refreshed_at = datetime('now')
+            WHERE id = ?
+            """,
+            (rate, contact, notes, existing[0]),
+        )
+        return False
+    insert_opportunity(
+        conn,
+        lane=lane,
+        commodity=commodity,
+        rate=rate,
+        contact=contact,
+        notes=notes,
+        source=source,
+    )
+    return True
 
 
 def fetch_opportunities(conn) -> pd.DataFrame:
@@ -165,9 +206,9 @@ def render_load_board_page(
             f"""
             <div class="lf-panel" style="margin-bottom:0.5rem;padding:0.75rem 1rem;">
                 <strong>{item['commodity']}</strong> · {item['lane']}<br/>
-                <span style="color:#e85d04;font-weight:700;">{item['rate']}</span>
+                <span style="color:var(--lf-orange);font-weight:700;">{item['rate']}</span>
                 · {item['contact']} · Posted {item['posted']}<br/>
-                <span style="font-size:0.85rem;color:#94a3b8;">{item['notes']}</span>
+                <span style="font-size:0.85rem;color:var(--lf-muted);">{item['notes']}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -203,11 +244,11 @@ def render_load_board_page(
                             rate=row["rate"],
                             contact=row["contact"],
                             notes=row.get("notes", ""),
-                            source="bulkloads_placeholder",
+                            source="BulkLoads",
                         )
                         conn.commit()
-                    clear_cache()
-                    st.success("Listing saved to opportunities.")
-                    st.rerun()
+                        clear_cache()
+                        st.success("Listing saved to opportunities.")
+                        st.rerun()
                 except Exception as exc:
                     st.error(f"Import failed: {exc}")

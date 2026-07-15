@@ -9,6 +9,8 @@
     { "src": "/css/(.*)", "dest": "/web/css/$1" },
     { "src": "/js/(.*)", "dest": "/web/js/$1" },
     { "src": "/manifest.json", "dest": "/web/manifest.json" },
+    { "src": "/manifest-driver.json", "dest": "/web/manifest-driver.json" },
+    { "src": "/driver/?", "dest": "https://dispatch.lpfreight.com/app/?view=driver" },
     { "src": "/app/(.*)", "dest": "https://dispatch.lpfreight.com/app/$1" },
     { "src": "/(.*)", "dest": "/web/$1" }
   ],

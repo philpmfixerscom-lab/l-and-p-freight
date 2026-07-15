@@ -1,58 +1,100 @@
-# L & P Dispatch v3.0 — Freight OS
+# L & P Dispatch — Lawson Freight Platform v4.4
 
-**Local-first freight intelligence platform for Phillip & Lawson (L & P Dispatch)**  
-Spruce Pine NC · 39ft / 24-ton lined end-dump · Spruce Pine → Central Georgia lane
-
----
-
-## Vision
-
-L & P Dispatch Freight OS is a **premium, offline-capable command center** built for a single-truck operation that needs to **look and perform like 2026 freight tech** — without giving up data ownership. Every record lives on your machine. AI is **transparent and rule-based** (no black-box ML). Phillip and Lawson make every final call.
-
-**Sell it in 60 seconds:** Settings → **LOAD DEMO DATA** → Dashboard → AI Intelligence → Documents.
+**Fleet-ready dispatch OS for Phillip & Lawson**  
+Spruce Pine NC · 39ft / 24-ton end-dump · Spruce Pine → Central Georgia lane
 
 ---
 
-## Quick Start
+## Fleet Stack
+
+| Layer | What it is | Local URL |
+|-------|------------|-----------|
+| **Website** | Marketing landing + fleet entry | http://127.0.0.1:8080 |
+| **Dispatch App** | Full operations command center | http://127.0.0.1:8502 |
+| **Driver App** | Cab mobile UI (GPS, status, emergencies) | http://127.0.0.1:8502/?view=driver |
+
+Production: **https://dispatch.lpfreight.com/** · **/app/** · **/driver/**
+
+---
+
+## Quick Start (Local)
 
 ```powershell
 cd "Projects/L & P Freight"
+.\run-fleet.ps1
+```
+
+Opens website + dispatch together. Install both PWAs from the website or in-app prompts.
+
+Dispatch only:
+
+```powershell
 .\run.ps1
 ```
 
-Open **http://localhost:8501**
+---
 
-### Requirements
+## Fleet Features
 
-- Python 3.11–3.13
-- `streamlit`, `pandas`, `openpyxl`, `reportlab`, `twilio` (optional)
+| Feature | Dispatch | Driver |
+|---------|----------|--------|
+| Dashboard & KPIs | ✅ | — |
+| Leads CRM | ✅ | — |
+| Load Logger + SMS auto-alert | ✅ | — |
+| Load Board / BulkLoads intel | ✅ | — |
+| GPS + Traccar live | ✅ | ✅ |
+| BOL PDF generator | ✅ | — |
+| Twilio SMS / SMTP alerts | ✅ | Arrival log |
+| Emergency tap-to-call panel | ✅ | ✅ |
+| Night driving / mobile PWA | ✅ | ✅ (cabin dark mode) |
+| Status updates from cab | — | ✅ |
 
 ---
 
-## Killer Features to Demo
+## Twilio SMS (Operational)
 
-| Feature | Where | What to show |
-|--------|--------|--------------|
-| **Demo Mode** | Settings → LOAD DEMO DATA | 12 loads, fuel, maintenance, arrivals — instant wow |
-| **Live Map Sim** | Dashboard | Animated truck on Spruce Pine → GA corridor |
-| **AI Load Score** | AI Intelligence | Score 0–100 with profitability / deadhead / trailer / history breakdown |
-| **Rate Simulator** | AI Intelligence → Simulator | Revenue, fuel est., margin % — transparent math |
-| **Document OCR** | Documents | Camera or upload → simulated extraction → CREATE LOAD |
-| **Voice + AI Summary** | Load Logger / Leads & Calls | Record + text → structured fields + suggested actions |
-| **Smart Arrival** | Geofence Dispatch | Haversine zones → pre-filled status, notes, SMS draft |
-| **SMS Generator** | SMS Alerts | Arrival / load update / departure templates + optional Twilio |
-| **Branded Outputs** | Reports | BOL PDF · performance report · invoice preview |
-| **Predictive Insights** | Insights | Lane trends, maintenance alerts, Trimac backhaul ROI |
+Copy `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml`:
+
+```toml
+[twilio]
+account_sid = "ACxxxxxxxx..."
+auth_token = "your_token"
+from_number = "+1your_twilio_number"
+dispatch_phone = "+18284678218"
+auto_send_new_load = "1"
+```
+
+**Alerts tab** → Send Test Alert · Auto SMS on new load · Auto SMS on Dispatched/In Transit
 
 ---
 
-## Design Principles
+## Production Deploy (Docker + HTTPS)
 
-- **Glassmorphism / cyber-trucking** aesthetic — dark sidebar, orange CTAs, pulsing traffic lights
-- **Thumb-zone mobile** — ≥52px (56px on mobile) touch targets, night-driving mode
-- **Traffic-light status** — green / amber / red on KPIs, scores, and insights
-- **ROI inside the app** — e.g. *"This recommendation saves X deadhead miles"*
-- **L & P Dispatch branding** everywhere — BOLs, invoices, reports, SMS
+```powershell
+cd lawson-freight-platform
+copy .env.example .env
+# Edit .env: LP_APP_URL=https://dispatch.lpfreight.com, LP_WEB_MODE=1
+.\deploy\production.ps1
+```
+
+Verify:
+
+```powershell
+.\deploy\verify-production.ps1
+```
+
+Stack: **nginx** (website + `/app/` proxy) · **Streamlit** · **certbot** · optional Cloudflare tunnel
+
+---
+
+## Verify Locally
+
+```powershell
+.\run-fleet.ps1          # in another terminal:
+.\scripts\verify_fleet_local.ps1
+```
+
+Runs pytest + health checks for website, dispatch, and driver entry.
 
 ---
 
@@ -60,25 +102,10 @@ Open **http://localhost:8501**
 
 | Path | Contents |
 |------|----------|
-| `./lp_dispatch.db` | All SQLite records (loads, leads, geofences, fuel, etc.) |
-| `./attachments/` | Voice memos, BOL PDFs, document scans |
+| `./lp_dispatch.db` | SQLite — loads, leads, SMS log, settings |
+| `./attachments/` | BOL PDFs, voice memos |
 
-No cloud sync. Twilio is **optional** — credentials stored only in local `app_settings`.
-
----
-
-## Owner Operations
-
-- **Phillip / Lawson role** — Settings → Operating as (role-aware dashboard header)
-- **Night Driving** — sidebar toggle or Settings
-- **Bulk import** — Load Logger → CSV/XLSX → VALIDATE → IMPORT
-- **Nuclear Delete** — Settings → type `DELETE L&P` (irreversible)
-
----
-
-## AI Disclaimer
-
-All "AI" features are **transparent rule-based engines** — load scoring, OCR simulation, voice summary, and suggestions show their logic. Not legal, financial, or safety advice. Replace OCR placeholder with Tesseract or a cloud API when ready.
+Local-first. Twilio optional — credentials in `secrets.toml` only.
 
 ---
 
@@ -86,5 +113,4 @@ All "AI" features are **transparent rule-based engines** — load scoring, OCR s
 
 *Maximize loaded miles · Minimize deadhead · Automate daily ops.*
 
-Primary lane: **Spruce Pine NC → Central Georgia (Kohler area)**  
 Hot leads: Sibelco · Covia · K-T Feldspar · Trimac

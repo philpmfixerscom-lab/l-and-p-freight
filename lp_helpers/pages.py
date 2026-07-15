@@ -1127,7 +1127,7 @@ def render_geofence_dispatch() -> None:
             <div class="lf-panel" style="padding:0.85rem 1rem;margin-bottom:0.5rem;">
             <strong>{g['name']}</strong>
             <span class="lf-badge status">{g.get('geofence_type', 'Zone')}</span><br>
-            <span style="color:#64748b;font-size:0.85rem;">
+            <span style="color:var(--lf-muted);font-size:0.85rem;">
             {g.get('location_label', '')} · ({g['latitude']}, {g['longitude']}) ·
             {g['radius_m']:.0f}m arrive · {approach_m:.0f}m approach ring
             </span></div>

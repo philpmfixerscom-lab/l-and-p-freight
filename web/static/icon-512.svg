@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="L and P Freight">
+  <rect width="512" height="512" rx="96" fill="#0b1628"/>
+  <rect x="64" y="128" width="384" height="256" rx="32" fill="#e85d04"/>
+  <text x="256" y="288" text-anchor="middle" font-family="system-ui,sans-serif" font-size="128" font-weight="800" fill="#fff">L&amp;P</text>
+  <text x="256" y="360" text-anchor="middle" font-family="system-ui,sans-serif" font-size="36" font-weight="600" fill="#fff">FREIGHT</text>
+  <rect x="108" y="404" width="296" height="20" rx="10" fill="#fb923c"/>
+</svg>

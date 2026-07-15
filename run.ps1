@@ -53,6 +53,6 @@ Start-Sleep -Seconds 1
 $ErrorActionPreference = 'Stop'
 
 $appUrl = "http://127.0.0.1:8502"
-Write-Host ('Starting L and P Freight Platform at ' + $appUrl) -ForegroundColor Green
+Write-Host ('Starting L and P Dispatch — Lawson Freight at ' + $appUrl) -ForegroundColor Green
 Write-Host ('Open ' + $appUrl + ' in your browser. If you see 404, wait 5 sec and refresh.') -ForegroundColor Yellow
 & $pythonExe -m streamlit run (Join-Path $PSScriptRoot 'app.py') --server.address 127.0.0.1 --server.port 8502 --server.headless false
