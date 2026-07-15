@@ -1,6 +1,6 @@
 """
-L & P Dispatch — Lawson Freight Platform.
-Optimized for Phillip & Lawson: Spruce Pine NC → Kohler GA · 39ft end-dump · mineral lane.
+L & P Freight Platform.
+Dispatch OS for owner-operators and small bulk fleets — loaded miles, rates, BOLs, cab view.
 """
 
 from __future__ import annotations
@@ -84,10 +84,10 @@ except ImportError:
     CARRIER_NAME = "L & P Freight"
     PLATFORM_TITLE = "L & P Freight Platform"
     PAGE_TITLE = "L & P Freight"
-    TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
+    TAGLINE = "Load more. Deadhead less. Get home."
     MISSION_BLURB = (
-        "Build loaded miles Spruce Pine NC → Central Georgia (Kohler area). "
-        "Minimize deadhead on Hwy 19E & 226."
+        "Built for independent bulk haulers and small dispatch teams. "
+        "Track loaded vs empty miles, quote by the ton, and run the cab without enterprise clutter."
     )
     DEFAULT_OWNER = "Phillip"
     OWNERS = ("Phillip", "Lawson")
@@ -1604,7 +1604,7 @@ def render_dashboard_tab() -> None:
         f"{loaded_pct:.0%}",
         delta=loaded_delta,
         delta_color="normal" if loaded_pct >= LOADED_MILE_TARGET else "inverse",
-        help=f"Lawson target ≥ {LOADED_MILE_TARGET:.0%} on Spruce Pine → Kohler lane",
+        help=f"Target ≥ {LOADED_MILE_TARGET:.0%} loaded miles — empty miles kill margin",
     )
     kpi2.metric("Pipeline Revenue", f"${metrics['pipeline_revenue']:,.0f}")
     kpi3.metric(
@@ -1622,6 +1622,75 @@ def render_dashboard_tab() -> None:
 
     with st.expander("🚨 Emergency Dispatch", expanded=False):
         _render_emergency_controls(key_prefix="dash_em", compact=True)
+
+    with st.expander("🔄 Return loads · cut deadhead (GA → NC)", expanded=False):
+        st.caption(
+            "Score opportunities for the **return trip** toward western NC after a "
+            "Central Georgia delivery. Higher score = fewer empty miles home."
+        )
+        try:
+            from lp_helpers.deadhead import (
+                opportunities_as_candidates,
+                rank_return_candidates,
+                score_return_load,
+            )
+
+            # Manual quick scorer
+            st.markdown("##### Score a candidate return")
+            c1, c2 = st.columns(2)
+            ret_origin = c1.text_input(
+                "Pickup (near GA)",
+                value="Central Georgia",
+                key="dh_origin",
+            )
+            ret_dest = c2.text_input(
+                "Destination (toward home)",
+                value="Western NC / Spruce Pine area",
+                key="dh_dest",
+            )
+            c3, c4 = st.columns(2)
+            ret_commodity = c3.text_input("Commodity", value="Aggregate", key="dh_commodity")
+            ret_rate = c4.text_input("Rate hint ($/ton or total)", value="42", key="dh_rate")
+            scored = score_return_load(
+                origin=ret_origin,
+                destination=ret_dest,
+                commodity=ret_commodity,
+                rate_hint=ret_rate,
+                current_location="Central Georgia",
+                home=TARGET_LANE_ORIGIN,
+            )
+            g1, g2, g3 = st.columns(3)
+            g1.metric("Score", f"{scored.score}/100")
+            g2.metric("Grade", scored.grade)
+            g3.metric("Call", scored.label)
+            st.caption(" · ".join(scored.reasons))
+
+            # Board opportunities ranked
+            try:
+                with closing(get_connection()) as conn:
+                    opp_df = pd.read_sql_query(
+                        "SELECT * FROM opportunities ORDER BY created_at DESC LIMIT 25",
+                        conn,
+                    )
+            except Exception:
+                opp_df = pd.DataFrame()
+            if not opp_df.empty:
+                st.markdown("##### From your load board")
+                ranked = rank_return_candidates(
+                    opportunities_as_candidates(opp_df),
+                    home=TARGET_LANE_ORIGIN,
+                    current_location="Central Georgia",
+                )[:8]
+                for cand, sc in ranked:
+                    st.markdown(
+                        f"**{sc.grade} · {sc.score}** — {cand.get('lane') or cand.get('destination')} "
+                        f"· {cand.get('commodity') or '—'} · {cand.get('rate') or 'rate n/a'}"
+                    )
+                    st.caption(sc.label + " — " + "; ".join(sc.reasons[:3]))
+            else:
+                st.info("Add board opportunities (Board tab) to auto-rank return options.")
+        except Exception as exc:
+            st.warning(f"Deadhead helper unavailable: {exc}")
 
     st.markdown("#### Quick Actions")
     action1, action2, action3, action4 = st.columns(4)
@@ -3000,7 +3069,7 @@ def safe_render_driver_view() -> None:
 
 
 def apply_platform_theme(night_mode: bool | None = None) -> None:
-    """Complete high-contrast theme — delegates to lp_helpers.ui_theme."""
+    """Complete consistent theming — delegates to lp_helpers.ui_theme."""
     try:
         from lp_helpers.ui_theme import apply_platform_theme as _apply
 
@@ -3008,7 +3077,6 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         return
     except Exception:
         pass
-
     if night_mode is None:
         if "night_mode" not in st.session_state:
             st.session_state.night_mode = True
@@ -3016,20 +3084,20 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
     else:
         night = bool(night_mode)
         st.session_state.night_mode = night
-
-    # Minimal fallback if helper package unavailable
     if night:
         st.markdown(
             """
             <style>
             .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; }
             section[data-testid="stSidebar"] { background-color: #1e2937 !important; }
-            h1, h2, h3, h4, h5, p, label, span, .stMarkdown { color: #f1f5f9 !important; font-size: 1.05rem !important; }
-            div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #bae6fd !important; font-size: 1.65rem !important; font-weight: 800 !important; }
             .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {
-                background-color: #1e2937 !important; color: #f1f5f9 !important; border: 2px solid #475569 !important;
+                background-color: #1e2937 !important; color: #e0e7ff !important;
+                border: 2px solid #475569 !important; -webkit-text-fill-color: #e0e7ff !important;
             }
-            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important; color: white !important; font-weight: 700 !important; }
+            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: #ffffff !important; font-weight: 700 !important; min-height: 48px !important; }
+            button[kind="secondary"] { background-color: #1e2937 !important; color: #f1f5f9 !important; border: 2px solid #475569 !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #bae6fd !important; font-size: 1.6rem !important; font-weight: 800 !important; }
             </style>
             """,
             unsafe_allow_html=True,
@@ -3040,12 +3108,14 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
             <style>
             .stApp { background-color: #f8fafc !important; color: #0f172a !important; }
             section[data-testid="stSidebar"] { background-color: #e2e8f0 !important; }
-            h1, h2, h3, h4, h5, p, label, span, .stMarkdown { color: #0f172a !important; font-size: 1.05rem !important; }
-            div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #1e40af !important; font-size: 1.65rem !important; font-weight: 800 !important; }
             .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {
-                background-color: #ffffff !important; color: #0f172a !important; border: 2px solid #cbd5e1 !important;
+                background-color: #ffffff !important; color: #0f172a !important;
+                border: 2px solid #cbd5e1 !important; -webkit-text-fill-color: #0f172a !important;
             }
-            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important; color: white !important; font-weight: 700 !important; }
+            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: #ffffff !important; font-weight: 700 !important; min-height: 48px !important; }
+            button[kind="secondary"] { background-color: #f1f5f9 !important; color: #0f172a !important; border: 2px solid #cbd5e1 !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #1e40af !important; font-size: 1.6rem !important; font-weight: 800 !important; }
             </style>
             """,
             unsafe_allow_html=True,
@@ -3061,8 +3131,8 @@ def render_sidebar_brand(
     """Safe fallback sidebar brand header."""
     try:
         st.sidebar.markdown(f"### {carrier}")
-        st.sidebar.caption(f"{lane_origin} -> {lane_dest} · {trailer} · Phillip & Lawson")
-        st.sidebar.caption("Owner-Operator Command Center | Spruce Pine Strong")
+        st.sidebar.caption(f"{lane_origin} -> {lane_dest} · {trailer}")
+        st.sidebar.caption("Owner-operator & small-fleet dispatch")
     except Exception:
         pass
 

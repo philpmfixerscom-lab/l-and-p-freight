@@ -1,7 +1,7 @@
-# L & P Dispatch — Lawson Freight Platform v4.4
+# L & P Freight Platform v4.4
 
-**Fleet-ready dispatch OS for Phillip & Lawson**  
-Spruce Pine NC · 39ft / 24-ton end-dump · Spruce Pine → Central Georgia lane
+**Load more. Deadhead less. Get home.**  
+Dispatch OS for owner-operators and small bulk fleets — rates by the ton, loaded-mile tracking, cab-ready driver view.
 
 ---
 
@@ -153,8 +153,8 @@ Local-first. Twilio optional — credentials in `secrets.toml` only.
 
 ---
 
-## Built for L & P Dispatch
+## Built for small fleets that care about cash flow
 
-*Maximize loaded miles · Minimize deadhead · Automate daily ops.*
+*Maximize loaded miles · Minimize deadhead · Get home.*
 
-Hot leads: Sibelco · Covia · K-T Feldspar · Trimac
+Tagline: **Load more. Deadhead less. Get home.**

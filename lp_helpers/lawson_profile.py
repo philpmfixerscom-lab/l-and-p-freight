@@ -12,14 +12,20 @@ from typing import Any
 CARRIER_NAME = "L & P Freight"
 # Legacy aliases kept for internal flags; never show to end users.
 PLATFORM_EDITION = "Production"
-PLATFORM_TAGLINE_INTERNAL = "Stable · Automated · Competitive"
+PLATFORM_TAGLINE_INTERNAL = "Fewer empty miles. Clearer cash flow."
 PLATFORM_TITLE = "L & P Freight Platform"
 PAGE_TITLE = "L & P Freight"
-TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
+# Public-facing tagline — O/O and small dispatch (not personal names)
+TAGLINE = "Load more. Deadhead less. Get home."
 MISSION_BLURB = (
-    "Build loaded miles from Spruce Pine, NC to Central Georgia (Kohler area). "
-    "Every empty mile is margin lost — prioritize backhauls, feldspar/quartz shippers "
-    "on Hwy 19E & 226, and lane rates that cover fuel + deadhead."
+    "Built for independent bulk haulers and small dispatch teams on regional lanes. "
+    "Track loaded vs empty miles, quote by the ton, keep shippers warm, and run the cab "
+    "without enterprise clutter — so more miles pay and more nights end at home."
+)
+MARKETING_HEADLINE = "Run your trucks. Not a mountain of software."
+MARKETING_SUBHEAD = (
+    "Dispatch, rates, BOLs, and a cab-ready driver view for owner-operators "
+    "and small fleets who live on loaded miles — not empty ones."
 )
 
 DRIVERS: tuple[str, ...] = ("Phillip", "Lawson")

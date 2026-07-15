@@ -133,6 +133,32 @@ def test_multi_tenant_schema_and_repos(tmp_path, monkeypatch):
         assert lead_id > 0
 
 
+def test_deadhead_return_scoring():
+    from lp_helpers.deadhead import rank_return_candidates, score_return_load
+
+    good = score_return_load(
+        origin="Macon, GA",
+        destination="Asheville / Spruce Pine, NC",
+        commodity="Feldspar",
+        rate_hint=48,
+    )
+    weak = score_return_load(
+        origin="Macon, GA",
+        destination="Miami, FL",
+        commodity="General freight",
+        rate_hint=20,
+    )
+    assert good.score > weak.score
+    assert good.grade in ("A", "B", "C")
+    ranked = rank_return_candidates(
+        [
+            {"lane": "GA → Miami FL", "commodity": "Van", "rate": "1.50/mi"},
+            {"lane": "GA → Spruce Pine NC", "commodity": "Aggregate", "rate": "45/ton"},
+        ]
+    )
+    assert ranked[0][1].score >= ranked[-1][1].score
+
+
 def test_authz_and_telematics_port():
     from lp_helpers.ai.ports import RulesRateOptimizer
     from lp_helpers.authz import Principal, ROLE_DRIVER, can, default_principal, require
