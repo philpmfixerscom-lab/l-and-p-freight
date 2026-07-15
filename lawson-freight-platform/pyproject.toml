@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "l-and-p-freight"
+version = "3.2.0"
+description = "Local-first freight intelligence platform for L & P Dispatch — Spruce Pine NC to Central Georgia."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Phillip Vencill", email = "phil.pmfixers.com@gmail.com" },
+]
+keywords = ["trucking", "dispatch", "streamlit", "sqlite", "eld"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Scheduling",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "streamlit>=1.32.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "reportlab>=4.0.0",
+    "plotly>=5.18.0",
+    "fpdf2>=2.8.0",
+    "twilio>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/philpmfixerscom-lab/l-and-p-freight"
+Repository = "https://github.com/philpmfixerscom-lab/l-and-p-freight"
+Issues = "https://github.com/philpmfixerscom-lab/l-and-p-freight/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lp_helpers*", "tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

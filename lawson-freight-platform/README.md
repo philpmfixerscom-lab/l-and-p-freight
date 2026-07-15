@@ -13,11 +13,7 @@ Spruce Pine NC · 39ft / 24-ton end-dump · Spruce Pine → Central Georgia lane
 | **Dispatch App** | Full operations command center | http://127.0.0.1:8502 |
 | **Driver App** | Cab mobile UI (GPS, status, emergencies) | http://127.0.0.1:8502/?view=driver |
 
-<<<<<<< HEAD
 Production: **https://dispatch.lpfreight.com/** · **/app/** · **/driver/**
-=======
-**Quick demo:** Settings → **LOAD DEMO DATA** → Dashboard → AI Intelligence → Documents.
->>>>>>> ab68846242f4f5269a6ae84320e7ed9685bb4e23
 
 ---
 
