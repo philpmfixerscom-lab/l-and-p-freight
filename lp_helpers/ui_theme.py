@@ -706,13 +706,9 @@ def inject_ui_css(night_mode: bool = False) -> None:
 
 
 def apply_platform_theme(night_mode: bool | None = None) -> None:
-    """High-contrast, trucker-friendly theme (WCAG 2.1 AA+ oriented).
-
-    Targets:
-    - Normal text ~7:1+ (dark slate on off-white / near-white on navy)
-    - Large metric values bold and high-contrast
-    - Visible focus rings on interactive controls
-    - Base font 17px; touch-friendly button/input min heights
+    """
+    Complete high-contrast, trucker-friendly theme for Lawson Freight Platform.
+    Excellent text visibility in form fields for both Day and Night mode.
     """
     if night_mode is None:
         if "night_mode" not in st.session_state:
@@ -723,255 +719,196 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         st.session_state.night_mode = night
 
     if night:
+        # ====================== NIGHT MODE ======================
         st.markdown(
             """
             <style>
-            :root {
-                --text-main: #f1f5f9;
-                --text-muted: #cbd5e1;
-                --bg-card: #1e2937;
-                --border: #64748b;
-                --bg-app: #0b1120;
-                --accent: #7dd3fc;
-                --focus: #fbbf24;
+            .stApp, [data-testid="stAppViewContainer"], .main, .block-container {
+                background-color: #0b1120 !important;
+                color: #f1f5f9 !important;
             }
-            html, body, .stApp, [data-testid="stAppViewContainer"],
-            [data-testid="stHeader"], .main, .block-container {
-                background-color: var(--bg-app) !important;
-                color: var(--text-main) !important;
-                font-size: 17px !important;
-            }
+            .stSidebar,
             section[data-testid="stSidebar"],
             section[data-testid="stSidebar"] > div,
             [data-testid="stSidebarContent"] {
                 background-color: #1e2937 !important;
             }
-            section[data-testid="stSidebar"] *,
-            section[data-testid="stSidebar"] label,
-            section[data-testid="stSidebar"] p,
-            section[data-testid="stSidebar"] span {
-                color: var(--text-main) !important;
+            section[data-testid="stSidebar"] * {
+                color: #f1f5f9 !important;
             }
-            h1 { color: var(--text-main) !important; font-size: 1.9rem !important; font-weight: 800 !important; }
-            h2 { color: var(--text-main) !important; font-size: 1.5rem !important; font-weight: 800 !important; }
-            h3, h4, h5 { color: var(--text-main) !important; font-size: 1.2rem !important; font-weight: 700 !important; }
-            .stMarkdown, .stMarkdown p, p, label, span {
-                color: var(--text-main) !important;
+
+            /* Headers & General Text */
+            h1, h2, h3, h4, h5, h6, p, label, span, .stMarkdown, .stMarkdown p {
+                color: #f1f5f9 !important;
                 font-size: 1.05rem !important;
-                line-height: 1.5 !important;
             }
-            .stCaption, [data-testid="stCaptionContainer"] {
-                color: var(--text-muted) !important;
-                font-size: 0.95rem !important;
-            }
+
+            /* Metric Cards */
             div[data-testid="stMetric"] {
-                background-color: var(--bg-card) !important;
-                border: 2px solid var(--border) !important;
-                border-radius: 12px !important;
-                padding: 0.75rem 0.9rem !important;
+                background-color: #1e2937 !important;
+                border: 2px solid #475569 !important;
+                border-radius: 10px !important;
             }
             div[data-testid="stMetric"] label {
+                color: #94a3b8 !important;
                 font-size: 0.95rem !important;
-                color: var(--text-muted) !important;
-                font-weight: 600 !important;
             }
             div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+                color: #bae6fd !important;
                 font-size: 1.65rem !important;
                 font-weight: 800 !important;
-                color: var(--accent) !important;
             }
-            .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
-                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
-                color: #ffffff !important;
-                font-weight: 700 !important;
-                font-size: 1.05rem !important;
-                padding: 0.7rem 1.1rem !important;
-                min-height: 48px !important;
-                border: 2px solid #60a5fa !important;
-                border-radius: 10px !important;
-            }
-            .stButton > button:hover, .stDownloadButton > button:hover {
-                filter: brightness(1.12) !important;
-            }
-            .stButton > button:focus-visible,
-            .stDownloadButton > button:focus-visible,
-            .stFormSubmitButton > button:focus-visible,
-            .stTextInput input:focus,
-            .stNumberInput input:focus,
-            .stTextArea textarea:focus,
-            .stSelectbox > div > div:focus-within,
-            a:focus-visible {
-                outline: 3px solid var(--focus) !important;
-                outline-offset: 2px !important;
-                box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35) !important;
-            }
-            .stTextInput input, .stNumberInput input, .stTextArea textarea,
-            .stSelectbox > div > div, .stMultiSelect > div > div,
+
+            /* Form Fields - High Visibility (Prefilled text boxes) */
+            .stTextInput input,
+            .stTextArea textarea,
+            .stNumberInput input,
+            .stSelectbox > div > div,
+            .stMultiSelect > div > div,
             [data-baseweb="select"] > div {
-                background-color: var(--bg-card) !important;
-                color: var(--text-main) !important;
-                border-color: var(--border) !important;
+                background-color: #1e2937 !important;
+                color: #f1f5f9 !important;
+                border: 2px solid #475569 !important;
                 font-size: 1.05rem !important;
-                min-height: 44px !important;
+                border-radius: 8px !important;
             }
-            .stDataFrame, [data-testid="stDataFrame"] {
-                background-color: var(--bg-card) !important;
-                color: var(--text-main) !important;
-                border: 1px solid var(--border) !important;
-                border-radius: 10px !important;
-                font-size: 1rem !important;
+
+            /* Fix for selectbox / commodity / prefilled field text in night mode */
+            .stSelectbox > div > div,
+            .stSelectbox span,
+            .stSelectbox div[data-baseweb="select"],
+            .stSelectbox div[data-baseweb="select"] *,
+            .stSelectbox [data-baseweb="select"] > div,
+            .stMultiSelect span,
+            .stMultiSelect div[data-baseweb="select"] *,
+            div[data-baseweb="popover"] li,
+            div[data-baseweb="menu"] li,
+            ul[role="listbox"] li,
+            div[data-baseweb="popover"] ul,
+            [data-baseweb="select"] span {
+                color: #f1f5f9 !important;
+                background-color: #1e2937 !important;
             }
-            .stExpander, [data-testid="stExpander"] {
-                background-color: var(--bg-card) !important;
-                border: 1px solid var(--border) !important;
-                border-radius: 10px !important;
+            .stSelectbox label,
+            .stMultiSelect label,
+            .stTextInput label,
+            .stNumberInput label,
+            .stTextArea label,
+            label {
+                color: #f1f5f9 !important;
             }
-            hr { border-color: #475569 !important; }
-            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label {
-                background: var(--bg-card) !important;
-                border: 2px solid var(--border) !important;
-                border-radius: 999px !important;
-                padding: 0.5rem 1rem !important;
-                color: var(--text-main) !important;
+            /* Prefilled values (not only placeholders) */
+            .stTextInput input:not(:placeholder-shown),
+            .stTextArea textarea:not(:placeholder-shown),
+            .stNumberInput input:not(:placeholder-shown) {
+                color: #f1f5f9 !important;
+                -webkit-text-fill-color: #f1f5f9 !important;
+                caret-color: #f1f5f9 !important;
+            }
+
+            .stTextInput input::placeholder,
+            .stTextArea textarea::placeholder {
+                color: #64748b !important;
+            }
+
+            .stTextInput input:focus,
+            .stTextArea textarea:focus,
+            .stNumberInput input:focus {
+                border-color: #60a5fa !important;
+                box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25) !important;
+            }
+
+            /* Buttons */
+            .stButton > button,
+            .stDownloadButton > button {
+                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: white !important;
                 font-weight: 700 !important;
-                font-size: 0.98rem !important;
-            }
-            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:has(input:checked) {
-                background: #1e40af !important;
-                border-color: #7dd3fc !important;
-                color: #ffffff !important;
-            }
-            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:focus-within {
-                outline: 3px solid var(--focus) !important;
-                outline-offset: 2px !important;
+                font-size: 1rem !important;
+                border: 2px solid #60a5fa !important;
+                border-radius: 8px !important;
             }
             </style>
             """,
             unsafe_allow_html=True,
         )
+
     else:
+        # ====================== DAY MODE ======================
         st.markdown(
             """
             <style>
-            :root {
-                --text-main: #0f172a;
-                --text-muted: #334155;
-                --bg-card: #ffffff;
-                --border: #94a3b8;
-                --bg-app: #f1f5f9;
-                --accent: #0c4a6e;
-                --focus: #b45309;
+            .stApp, [data-testid="stAppViewContainer"], .main, .block-container {
+                background-color: #f8fafc !important;
+                color: #0f172a !important;
             }
-            html, body, .stApp, [data-testid="stAppViewContainer"],
-            [data-testid="stHeader"], .main, .block-container {
-                background-color: var(--bg-app) !important;
-                color: var(--text-main) !important;
-                font-size: 17px !important;
-            }
+            .stSidebar,
             section[data-testid="stSidebar"],
             section[data-testid="stSidebar"] > div,
             [data-testid="stSidebarContent"] {
                 background-color: #e2e8f0 !important;
             }
-            section[data-testid="stSidebar"] *,
-            section[data-testid="stSidebar"] label,
-            section[data-testid="stSidebar"] p,
-            section[data-testid="stSidebar"] span {
-                color: var(--text-main) !important;
+            section[data-testid="stSidebar"] * {
+                color: #0f172a !important;
             }
-            h1 { color: var(--text-main) !important; font-size: 1.9rem !important; font-weight: 800 !important; }
-            h2 { color: var(--text-main) !important; font-size: 1.5rem !important; font-weight: 800 !important; }
-            h3, h4, h5 { color: var(--text-main) !important; font-size: 1.2rem !important; font-weight: 700 !important; }
-            .stMarkdown, .stMarkdown p, p, label, span {
-                color: var(--text-main) !important;
+
+            /* Headers & General Text */
+            h1, h2, h3, h4, h5, h6, p, label, span, .stMarkdown, .stMarkdown p {
+                color: #0f172a !important;
                 font-size: 1.05rem !important;
-                line-height: 1.5 !important;
             }
-            .stCaption, [data-testid="stCaptionContainer"] {
-                color: var(--text-muted) !important;
-                font-size: 0.95rem !important;
-            }
+
+            /* Metric Cards */
             div[data-testid="stMetric"] {
-                background-color: var(--bg-card) !important;
-                border: 2px solid var(--border) !important;
-                border-radius: 12px !important;
-                padding: 0.75rem 0.9rem !important;
-                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1) !important;
+                background-color: #ffffff !important;
+                border: 2px solid #cbd5e1 !important;
+                border-radius: 10px !important;
             }
             div[data-testid="stMetric"] label {
+                color: #475569 !important;
                 font-size: 0.95rem !important;
-                color: var(--text-muted) !important;
-                font-weight: 600 !important;
             }
             div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+                color: #1e40af !important;
                 font-size: 1.65rem !important;
                 font-weight: 800 !important;
-                color: var(--accent) !important;
             }
-            .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
-                background: linear-gradient(135deg, #1e3a8a, #2563eb) !important;
-                color: #ffffff !important;
-                font-weight: 700 !important;
-                font-size: 1.05rem !important;
-                padding: 0.7rem 1.1rem !important;
-                min-height: 48px !important;
-                border: 2px solid #1d4ed8 !important;
-                border-radius: 10px !important;
-            }
-            .stButton > button:hover, .stDownloadButton > button:hover {
-                filter: brightness(1.06) !important;
-            }
-            .stButton > button:focus-visible,
-            .stDownloadButton > button:focus-visible,
-            .stFormSubmitButton > button:focus-visible,
-            .stTextInput input:focus,
-            .stNumberInput input:focus,
-            .stTextArea textarea:focus,
-            .stSelectbox > div > div:focus-within,
-            a:focus-visible {
-                outline: 3px solid var(--focus) !important;
-                outline-offset: 2px !important;
-                box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.3) !important;
-            }
-            .stTextInput input, .stNumberInput input, .stTextArea textarea,
-            .stSelectbox > div > div, .stMultiSelect > div > div,
+
+            /* Form Fields - High Visibility (Prefilled text boxes) */
+            .stTextInput input,
+            .stTextArea textarea,
+            .stNumberInput input,
+            .stSelectbox > div > div,
+            .stMultiSelect > div > div,
             [data-baseweb="select"] > div {
-                background-color: var(--bg-card) !important;
-                color: var(--text-main) !important;
-                border-color: var(--border) !important;
+                background-color: #ffffff !important;
+                color: #0f172a !important;
+                border: 2px solid #cbd5e1 !important;
                 font-size: 1.05rem !important;
-                min-height: 44px !important;
+                border-radius: 8px !important;
             }
-            .stDataFrame, [data-testid="stDataFrame"] {
-                background-color: var(--bg-card) !important;
-                color: var(--text-main) !important;
-                border: 1px solid var(--border) !important;
-                border-radius: 10px !important;
-                font-size: 1rem !important;
+
+            .stTextInput input::placeholder,
+            .stTextArea textarea::placeholder {
+                color: #64748b !important;
             }
-            .stExpander, [data-testid="stExpander"] {
-                background-color: var(--bg-card) !important;
-                border: 1px solid var(--border) !important;
-                border-radius: 10px !important;
+
+            .stTextInput input:focus,
+            .stTextArea textarea:focus,
+            .stNumberInput input:focus {
+                border-color: #3b82f6 !important;
+                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
             }
-            hr { border-color: #94a3b8 !important; }
-            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label {
-                background: var(--bg-card) !important;
-                border: 2px solid var(--border) !important;
-                border-radius: 999px !important;
-                padding: 0.5rem 1rem !important;
-                color: var(--text-main) !important;
+
+            /* Buttons */
+            .stButton > button,
+            .stDownloadButton > button {
+                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
+                color: white !important;
                 font-weight: 700 !important;
-                font-size: 0.98rem !important;
-            }
-            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:has(input:checked) {
-                background: #1e3a8a !important;
-                border-color: #1d4ed8 !important;
-                color: #ffffff !important;
-            }
-            div[data-testid="stHorizontalBlock"] div[role="radiogroup"] label:focus-within {
-                outline: 3px solid var(--focus) !important;
-                outline-offset: 2px !important;
+                font-size: 1rem !important;
+                border: 2px solid #60a5fa !important;
+                border-radius: 8px !important;
             }
             </style>
             """,

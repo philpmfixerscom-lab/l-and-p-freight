@@ -53,16 +53,29 @@ def test_single_package_tree_and_helper_sources():
 
 def test_lawson_profile_imports():
     from lp_helpers.lawson_profile import (
-        BIG_E_MODE,
+        CARRIER_NAME,
         LAWSON_SEED_LEADS,
         LAWSON_SIM_ROUTE,
+        OWNERS,
         PLATFORM_TITLE,
     )
 
-    assert BIG_E_MODE is True
+    assert "L & P" in CARRIER_NAME or "Freight" in CARRIER_NAME
+    assert "BIG E" not in PLATFORM_TITLE
+    assert len(OWNERS) >= 2
     assert len(LAWSON_SEED_LEADS) >= 4
     assert len(LAWSON_SIM_ROUTE) >= 2
-    assert "Lawson Freight" in PLATFORM_TITLE
+    assert "Freight" in PLATFORM_TITLE or "L & P" in PLATFORM_TITLE
+
+
+def test_fleet_context_default_tenant():
+    from lp_helpers.fleet_context import get_tenant_context, list_known_tenants
+
+    ctx = get_tenant_context()
+    assert ctx.tenant_id == "lp-freight"
+    assert "BIG E" not in ctx.platform_title
+    assert len(ctx.operators) >= 2
+    assert len(list_known_tenants()) >= 1
 
 
 def test_database_init_and_schema(tmp_path, monkeypatch):

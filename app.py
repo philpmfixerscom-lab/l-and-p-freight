@@ -52,7 +52,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "lp_dispatch.db"
 ATTACHMENTS_DIR = BASE_DIR / "attachments"
 BACKUP_DIR = BASE_DIR / "backups"
-APP_VERSION = "4.4 BIG E"
+APP_VERSION = "4.4"
 TRAILER_MAX_TONS = 24
 APPROVED_COMMODITIES = [
     "Feldspar", "Mica", "Spar", "Clay", "Rock",
@@ -64,8 +64,6 @@ DEFAULT_LANE_MILES = 285
 
 try:
     from lp_helpers.lawson_profile import (
-        BIG_E_MODE,
-        BIG_E_TAGLINE,
         CARRIER_NAME,
         DEFAULT_OWNER,
         OWNERS,
@@ -83,11 +81,9 @@ try:
         TRUCK_LABEL,
     )
 except ImportError:
-    BIG_E_MODE = True
-    BIG_E_TAGLINE = "BIG E Elite Refresh — Stable, Automated, Competitive"
-    CARRIER_NAME = "L & P Dispatch"
-    PLATFORM_TITLE = "Lawson Freight Platform"
-    PAGE_TITLE = "Lawson Freight"
+    CARRIER_NAME = "L & P Freight"
+    PLATFORM_TITLE = "L & P Freight Platform"
+    PAGE_TITLE = "L & P Freight"
     TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
     MISSION_BLURB = (
         "Build loaded miles Spruce Pine NC → Central Georgia (Kohler area). "
@@ -95,7 +91,7 @@ except ImportError:
     )
     DEFAULT_OWNER = "Phillip"
     OWNERS = ("Phillip", "Lawson")
-    TRUCK_LABEL = "L&P Lawson End-Dump"
+    TRUCK_LABEL = "L&P End-Dump"
     TRAILER_DESC = "39ft Frameless End-Dump"
     HIGHWAY_CORRIDORS = "Hwy 19E & 226"
     LOADED_MILE_TARGET = 0.80
@@ -263,20 +259,67 @@ def persist_setting(key: str, value: str) -> None:
 
 
 def get_active_owner() -> str:
-    """Current operator — Phillip or Lawson (persisted in app_settings)."""
+    """Get current owner with safe fallback (session → helper → DB → default)."""
     try:
-        from lp_helpers.ui_components import get_owner_role
+        if "owner_role" in st.session_state:
+            role = st.session_state["owner_role"]
+            if role in OWNERS:
+                return role
 
-        role = get_owner_role()
-        return role if role in OWNERS else DEFAULT_OWNER
-    except ImportError:
-        return _local_get_setting("owner_role", DEFAULT_OWNER) or DEFAULT_OWNER
+        try:
+            from lp_helpers.ui_components import get_owner_role
+
+            role = get_owner_role()
+            if role in OWNERS:
+                st.session_state["owner_role"] = role
+                return role
+        except Exception:
+            pass
+
+        role = _local_get_setting("owner_role", DEFAULT_OWNER)
+        if role in OWNERS:
+            st.session_state["owner_role"] = role
+            return role
+    except Exception:
+        pass
+
+    return DEFAULT_OWNER
 
 
 def set_active_owner(role: str) -> None:
+    """Safely set and persist the active owner with error handling."""
     if role not in OWNERS:
+        try:
+            st.warning(f"Invalid owner role: {role}")
+        except Exception:
+            pass
         return
-    persist_setting("owner_role", role)
+
+    try:
+        from lp_helpers.ui_components import set_owner_role
+
+        set_owner_role(role)
+    except ImportError:
+        try:
+            _local_set_setting("owner_role", role)
+        except Exception as exc:
+            try:
+                st.error(f"Failed to persist owner role: {exc}")
+            except Exception:
+                pass
+            st.session_state["owner_role"] = role
+            return
+    except Exception as exc:
+        try:
+            st.error(f"Failed to persist owner role: {exc}")
+        except Exception:
+            pass
+        try:
+            _local_set_setting("owner_role", role)
+        except Exception:
+            pass
+
+    st.session_state["owner_role"] = role
 
 
 def load_persistent_filters() -> None:
@@ -1359,37 +1402,52 @@ def match_lane_rates(
 
 
 def navigate_to_tab(tab_name: str) -> None:
-    """Switch main view via session state (works with controlled nav, not st.tabs)."""
+    """Navigate using single source of truth: st.session_state['active_tab'].
+
+    Never mutates Streamlit widget keys (avoids StreamlitAPIException).
+    Preserves filters/forms: only active_tab + optional nav_hint change.
+    """
     if tab_name == "Rates":
         st.session_state.open_rates_expander = True
         tab_name = "Dashboard"
     if tab_name not in TAB_KEYS:
+        try:
+            st.warning(f"Unknown tab: {tab_name}")
+        except Exception:
+            pass
         return
-    st.session_state.active_tab = tab_name
-    # Keep radio widget in sync when present
-    st.session_state["main_nav_radio"] = tab_name
+    st.session_state["active_tab"] = tab_name
     label = TAB_LABELS[TAB_KEYS.index(tab_name)]
     st.session_state.nav_hint = f"Opened **{label}**"
     st.rerun()
 
 
 def render_main_nav() -> str:
-    """Horizontal controlled navigation — Quick Actions can set active_tab reliably."""
+    """Button-based nav — active_tab is the only source of truth (Streamlit-safe).
+
+    Research note: Streamlit forbids writing to a widget's session key after that
+    widget is instantiated. Radio/select with key='main_nav_radio' caused jumps
+    and StreamlitAPIException when Quick Actions set that key mid-run.
+    Buttons only write active_tab, matching Samsara/Motive-style explicit nav.
+    """
     if "active_tab" not in st.session_state or st.session_state.active_tab not in TAB_KEYS:
         st.session_state.active_tab = "Dashboard"
-    if "main_nav_radio" not in st.session_state or st.session_state.main_nav_radio not in TAB_KEYS:
-        st.session_state.main_nav_radio = st.session_state.active_tab
 
-    choice = st.radio(
-        "Main navigation",
-        options=TAB_KEYS,
-        format_func=lambda key: TAB_LABELS[TAB_KEYS.index(key)],
-        horizontal=True,
-        key="main_nav_radio",
-        label_visibility="collapsed",
-    )
-    if choice != st.session_state.active_tab:
-        st.session_state.active_tab = choice
+    active = st.session_state.active_tab
+    cols = st.columns(len(TAB_KEYS))
+    for i, key in enumerate(TAB_KEYS):
+        label = TAB_LABELS[i]
+        is_active = key == active
+        with cols[i]:
+            if st.button(
+                label,
+                key=f"nav_btn_{key}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                if key != active:
+                    st.session_state.active_tab = key
+                    st.rerun()
     return st.session_state.active_tab
 
 
@@ -1400,32 +1458,76 @@ def _persist_owner_role() -> None:
 
 
 def render_lawson_sidebar_extras() -> None:
-    """Owner role + Lawson lane context in sidebar."""
-    active = get_active_owner()
-    st.selectbox(
-        "Operating as",
-        list(OWNERS),
-                index=list(OWNERS).index(active) if active in OWNERS else 0,
-        key="lawson_owner_role",
-        on_change=_persist_owner_role,
-    )
+    """Owner role selector (kept for compatibility with older call sites)."""
+    try:
+        current_owner = get_active_owner()
+        owner_index = list(OWNERS).index(current_owner) if current_owner in OWNERS else 0
+        selected_owner = st.selectbox(
+            "Operating as",
+            list(OWNERS),
+            index=owner_index,
+            key="owner_selector",
+        )
+        if selected_owner != current_owner:
+            set_active_owner(selected_owner)
+            st.rerun()
+    except Exception as exc:
+        st.error(f"Owner selector error: {exc}")
+        st.caption(f"Defaulting to {DEFAULT_OWNER}")
+        st.session_state["owner_role"] = DEFAULT_OWNER
 
 
 def render_sidebar() -> None:
+    """Combined sidebar with safe owner selector, theme toggle, and Driver View."""
     with st.sidebar:
-        render_sidebar_brand(
-            carrier=CARRIER_NAME,
-            lane_origin=TARGET_LANE_ORIGIN,
-            lane_dest=TARGET_LANE_DESTINATION,
-            trailer=TRAILER_DESC,
+        st.markdown(f"### {CARRIER_NAME}")
+        st.caption(
+            f"{TARGET_LANE_ORIGIN} -> {TARGET_LANE_DESTINATION} | {TRAILER_DESC}"
         )
-        render_lawson_sidebar_extras()
-        st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
-        render_day_night_toggle()
-        if st.button("Driver View (Beta)", use_container_width=True, key="driver_view_btn_fallback"):
+
+        # === Safe Owner Selector with Error Handling ===
+        try:
+            current_owner = get_active_owner()
+            owner_index = list(OWNERS).index(current_owner) if current_owner in OWNERS else 0
+
+            selected_owner = st.selectbox(
+                "Operating as",
+                list(OWNERS),
+                index=owner_index,
+                key="owner_selector",
+            )
+
+            if selected_owner != current_owner:
+                set_active_owner(selected_owner)
+                st.rerun()
+
+        except Exception as e:
+            st.error(f"Owner selector error: {e}")
+            st.session_state["owner_role"] = DEFAULT_OWNER
+
+        st.divider()
+
+        # Day / Night Toggle
+        try:
+            from lp_helpers.ui_components import render_day_night_toggle as _day_night
+        except ImportError:
+            _day_night = render_day_night_toggle
+        _day_night()
+
+        st.divider()
+
+        # Safe Driver View Button
+        if st.button("Driver View (Beta)", use_container_width=True, key="driver_view_btn"):
             st.session_state.view_mode = "driver"
             st.rerun()
-        st.caption(TAGLINE)
+
+        if st.button("Platform Health Check", use_container_width=True, key="sidebar_health_btn"):
+            # Use active_tab only — never set main_nav_radio mid-run
+            st.session_state.active_tab = "Alerts"
+            st.session_state.nav_hint = "Opened **Alerts** — expand Platform Health Check"
+            st.rerun()
+
+        st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")
 
 
 def render_target_lane_banner() -> None:
@@ -2871,7 +2973,7 @@ def safe_render_driver_view() -> None:
 
 
 def apply_platform_theme(night_mode: bool | None = None) -> None:
-    """High-contrast Day/Night theme — single entry used across the platform."""
+    """Complete high-contrast theme — delegates to lp_helpers.ui_theme."""
     try:
         from lp_helpers.ui_theme import apply_platform_theme as _apply
 
@@ -2880,7 +2982,6 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
     except Exception:
         pass
 
-    # Fallback if helper package unavailable
     if night_mode is None:
         if "night_mode" not in st.session_state:
             st.session_state.night_mode = True
@@ -2889,23 +2990,19 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         night = bool(night_mode)
         st.session_state.night_mode = night
 
+    # Minimal fallback if helper package unavailable
     if night:
         st.markdown(
             """
             <style>
-            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; font-size: 17px !important; }
+            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; }
             section[data-testid="stSidebar"] { background-color: #1e2937 !important; }
-            h1, h2, h3, h4, h5, p, label, span { color: #f1f5f9 !important; font-size: 1.05rem !important; }
-            div[data-testid="stMetric"] label { color: #94a3b8 !important; }
-            div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-                font-size: 1.65rem !important; font-weight: 800 !important; color: #bae6fd !important;
+            h1, h2, h3, h4, h5, p, label, span, .stMarkdown { color: #f1f5f9 !important; font-size: 1.05rem !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #bae6fd !important; font-size: 1.65rem !important; font-weight: 800 !important; }
+            .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {
+                background-color: #1e2937 !important; color: #f1f5f9 !important; border: 2px solid #475569 !important;
             }
-            .stButton>button, .stDownloadButton>button {
-                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
-                color: white !important; font-weight: 700 !important; font-size: 1rem !important;
-                border: 2px solid #60a5fa !important; min-height: 48px !important;
-            }
-            .stButton>button:focus-visible { outline: 3px solid #fbbf24 !important; outline-offset: 2px !important; }
+            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important; color: white !important; font-weight: 700 !important; }
             </style>
             """,
             unsafe_allow_html=True,
@@ -2914,19 +3011,14 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         st.markdown(
             """
             <style>
-            .stApp { background-color: #f8fafc !important; color: #0f172a !important; font-size: 17px !important; }
+            .stApp { background-color: #f8fafc !important; color: #0f172a !important; }
             section[data-testid="stSidebar"] { background-color: #e2e8f0 !important; }
-            h1, h2, h3, h4, h5, p, label, span { color: #0f172a !important; font-size: 1.05rem !important; }
-            div[data-testid="stMetric"] label { color: #475569 !important; }
-            div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-                font-size: 1.65rem !important; font-weight: 800 !important; color: #0c4a6e !important;
+            h1, h2, h3, h4, h5, p, label, span, .stMarkdown { color: #0f172a !important; font-size: 1.05rem !important; }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #1e40af !important; font-size: 1.65rem !important; font-weight: 800 !important; }
+            .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {
+                background-color: #ffffff !important; color: #0f172a !important; border: 2px solid #cbd5e1 !important;
             }
-            .stButton>button, .stDownloadButton>button {
-                background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
-                color: white !important; font-weight: 700 !important; font-size: 1rem !important;
-                min-height: 48px !important;
-            }
-            .stButton>button:focus-visible { outline: 3px solid #b45309 !important; outline-offset: 2px !important; }
+            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important; color: white !important; font-weight: 700 !important; }
             </style>
             """,
             unsafe_allow_html=True,
@@ -2949,18 +3041,27 @@ def render_sidebar_brand(
 
 
 def render_day_night_toggle():
-    """Fallback Day/Night toggle when ui_components is unavailable."""
+    """Reliable Day/Night mode toggle with immediate theme update (fallback path)."""
     if "night_mode" not in st.session_state:
-        st.session_state.night_mode = True
+        saved = _local_get_setting("night_mode", "true")
+        st.session_state.night_mode = str(saved).lower() in ("1", "true", "yes")
 
-    current = st.sidebar.toggle(
-        "Night Mode" if st.session_state.night_mode else "Day Mode",
+    toggle_label = "Night Mode" if st.session_state.night_mode else "Day Mode"
+
+    toggle = st.sidebar.toggle(
+        toggle_label,
         value=st.session_state.night_mode,
-        key="night_mode_toggle_v2_fallback",
+        key="night_mode_toggle_fallback",
     )
-    if current != st.session_state.night_mode:
-        st.session_state.night_mode = current
+
+    if toggle != st.session_state.night_mode:
+        st.session_state.night_mode = toggle
+        try:
+            _local_set_setting("night_mode", "true" if toggle else "false")
+        except Exception:
+            pass
         st.rerun()
+
     apply_platform_theme(bool(st.session_state.night_mode))
 
 
@@ -2973,9 +3074,17 @@ def main() -> None:
         layout="wide",
     )
 
-    # Theme ASAP so first paint is high-contrast (refined again after toggle)
+    # === Initialize Session State Persistence ===
+    if "owner_role" not in st.session_state:
+        st.session_state["owner_role"] = get_active_owner()
+
     if "night_mode" not in st.session_state:
-        st.session_state.night_mode = True
+        try:
+            saved = _local_get_setting("night_mode", "true")
+            st.session_state.night_mode = str(saved).lower() in ("1", "true", "yes")
+        except Exception:
+            st.session_state.night_mode = True
+
     apply_platform_theme(bool(st.session_state.night_mode))
 
     load_persistent_filters()
@@ -3014,34 +3123,11 @@ def main() -> None:
     night_mode = bool(st.session_state.get("night_mode", True))
     try:
         from lp_helpers.database import init_db
-        from lp_helpers.ui_components import (
-            inject_road_css,
-            is_night_mode,
-            render_day_night_toggle,
-            render_sidebar_brand,
-            render_section_header,
-        )
+        from lp_helpers.ui_components import inject_road_css, is_night_mode
 
         init_db()
-        with st.sidebar:
-            render_sidebar_brand(
-                carrier=CARRIER_NAME,
-                lane_origin=TARGET_LANE_ORIGIN,
-                lane_dest=TARGET_LANE_DESTINATION,
-                trailer=TRAILER_DESC,
-            )
-            render_lawson_sidebar_extras()
-            st.markdown('<div class="nav-group-label">Display</div>', unsafe_allow_html=True)
-            render_day_night_toggle()
-            if st.button("Driver View (Beta)", use_container_width=True, key="driver_view_btn"):
-                st.session_state.view_mode = "driver"
-                st.rerun()
-            if st.button("Platform Health Check", use_container_width=True, key="sidebar_health_btn"):
-                st.session_state.active_tab = "Alerts"
-                st.session_state.main_nav_radio = "Alerts"
-                st.session_state.nav_hint = "Opened **Alerts** — expand Platform Health Check"
-                st.rerun()
-            st.caption(f"{APP_VERSION} · {get_active_owner()} · Board · GPS · Alerts")
+        init_database()
+        render_sidebar()
         night_mode = is_night_mode()
         inject_road_css(night_mode)
         if night_mode:
@@ -3049,8 +3135,7 @@ def main() -> None:
     except ImportError:
         init_database()
         render_sidebar()
-    else:
-        init_database()
+        night_mode = bool(st.session_state.get("night_mode", True))
 
     # Final theme pass — wins over inject_road_css for text pop + contrast
     apply_platform_theme(night_mode)
@@ -3081,7 +3166,7 @@ def main() -> None:
     else:
         render_dashboard_tab()
 
-    st.caption(BIG_E_TAGLINE)
+    st.caption(f"{CARRIER_NAME} · {TAGLINE}")
 
 
 

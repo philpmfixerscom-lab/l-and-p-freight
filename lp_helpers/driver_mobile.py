@@ -12,27 +12,39 @@ CABIN_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
 :root {
-    --cabin-bg: #0b0f14; --cabin-card: #141a22; --cabin-text: #e2e8f0;
+    --cabin-bg: #0b0f14; --cabin-card: #141a22; --cabin-text: #f1f5f9;
     --cabin-muted: #94a3b8; --cabin-border: #2a3545; --cabin-orange: #f97316;
+    --cabin-danger: #ef4444;
 }
 html, body, [class*="css"] {
     font-family: 'Inter', system-ui, sans-serif !important;
     background: var(--cabin-bg) !important; color: var(--cabin-text) !important;
+    font-size: 17px !important;
 }
 #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
-.block-container { padding: 0.75rem 1rem 5rem !important; max-width: 480px !important; }
+.block-container { padding: 0.75rem 1rem 5.5rem !important; max-width: 480px !important; }
 .stButton > button {
-    min-height: 52px !important; font-weight: 700 !important;
+    min-height: 56px !important; font-weight: 700 !important; font-size: 1.05rem !important;
     border-radius: 14px !important; background: var(--cabin-orange) !important; color: #fff !important;
+    border: 2px solid #fb923c !important;
 }
 .cabin-card {
     background: var(--cabin-card); border: 1px solid var(--cabin-border);
     border-radius: 16px; padding: 1rem; margin-bottom: 0.75rem;
 }
-.pill { display:inline-block; padding:0.35rem 0.75rem; border-radius:999px;
-    font-size:0.8rem; font-weight:700; }
+.pill { display:inline-block; padding:0.4rem 0.85rem; border-radius:999px;
+    font-size:0.85rem; font-weight:700; }
 .pill-blue { background:rgba(59,130,246,0.2); color:#60a5fa; }
 .pill-green { background:rgba(34,197,94,0.2); color:#4ade80; }
+/* Large touch-friendly inputs for cab use */
+.stTextInput input, .stTextArea textarea, .stSelectbox > div > div {
+    min-height: 48px !important; font-size: 1.05rem !important;
+    color: #f1f5f9 !important; background: #1e2937 !important;
+    -webkit-text-fill-color: #f1f5f9 !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-size: 1.5rem !important; font-weight: 800 !important; color: #bae6fd !important;
+}
 </style>
 """
 
@@ -114,7 +126,7 @@ def render_driver_app(
     top1, top2 = st.columns([3, 1])
     with top1:
         st.markdown("## L & P Driver")
-        st.caption(f"{owner} · {truck_label}")
+        st.caption(f"{owner} · {truck_label} · Cab mode")
     with top2:
         if st.button("Exit", use_container_width=True, key="driver_exit_btn"):
             if on_exit:

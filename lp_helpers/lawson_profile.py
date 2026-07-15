@@ -1,14 +1,20 @@
-"""Lawson / L & P Dispatch operation profile — single source of truth for lane, assets, and branding."""
+"""L & P Freight operation profile — lane, assets, and branding.
+
+NOTE (multi-fleet roadmap): This module is the *current tenant default* for the
+single L&P operation. Future multi-company support should load a TenantContext
+(see lp_helpers/fleet_context.py) instead of hard-coding values here.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-CARRIER_NAME = "L & P Dispatch"
-BIG_E_MODE = True
-BIG_E_TAGLINE = "BIG E Elite Refresh — Stable, Automated, Competitive"
-PLATFORM_TITLE = "Lawson Freight Platform — BIG E Elite Refresh"
-PAGE_TITLE = "Lawson Freight"
+CARRIER_NAME = "L & P Freight"
+# Legacy aliases kept for internal flags; never show to end users.
+PLATFORM_EDITION = "Production"
+PLATFORM_TAGLINE_INTERNAL = "Stable · Automated · Competitive"
+PLATFORM_TITLE = "L & P Freight Platform"
+PAGE_TITLE = "L & P Freight"
 TAGLINE = "Spruce Pine NC → Central GA · Phillip & Lawson"
 MISSION_BLURB = (
     "Build loaded miles from Spruce Pine, NC to Central Georgia (Kohler area). "
@@ -17,8 +23,9 @@ MISSION_BLURB = (
 )
 
 DRIVERS: tuple[str, ...] = ("Phillip", "Lawson")
+OWNERS: tuple[str, ...] = DRIVERS  # operator roles for this tenant
 DEFAULT_OWNER = "Phillip"
-TRUCK_LABEL = "L&P Lawson End-Dump"
+TRUCK_LABEL = "L&P End-Dump"
 TRAILER_DESC = "39ft Frameless End-Dump"
 HIGHWAY_CORRIDORS = "Hwy 19E & 226"
 
