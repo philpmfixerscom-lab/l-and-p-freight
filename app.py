@@ -1582,17 +1582,16 @@ def render_target_lane_banner() -> None:
 
 
 def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
-    """Dashboard section: score GA → W NC return loads with transparent breakdown."""
+    """Primary Dashboard panel: I'm empty now → score returns with $ benefit."""
     st.markdown("---")
-    render_section_header("Cut deadhead home", icon="🔄")
-    st.caption(
-        "You just delivered in **Central Georgia**. Score a return that pulls you toward "
-        f"**{TARGET_LANE_ORIGIN}** — proximity · homebound direction · end-dump fit · rate vs lane."
-    )
+    render_section_header("I'm empty — find a return home", icon="🔄")
 
     try:
         from lp_helpers.deadhead import (
             DEFAULT_DELIVERY_ZONE,
+            DEFAULT_LANE_BASELINE_PER_TON,
+            estimate_empty_home_miles,
+            estimate_return_benefit,
             last_delivery_location,
             opportunities_as_candidates,
             rank_return_candidates,
@@ -1602,39 +1601,66 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
         st.warning(f"Deadhead helper unavailable: {exc}")
         return
 
-    empty_at = last_delivery_location(loads_df) or DEFAULT_DELIVERY_ZONE
-    st.info(f"**Empty near:** {empty_at}  ·  **Home corridor:** {TARGET_LANE_ORIGIN}")
+    detected = last_delivery_location(loads_df) or DEFAULT_DELIVERY_ZONE
+    if "dh_empty_at" not in st.session_state:
+        st.session_state.dh_empty_at = detected
 
-    left, right = st.columns([1.15, 1])
+    # --- I'm empty now strip ---
+    strip = st.container()
+    with strip:
+        s1, s2, s3 = st.columns([2, 1.2, 1])
+        with s1:
+            empty_at = st.text_input(
+                "I'm empty near",
+                key="dh_empty_at",
+                help="Usually last delivery (Central GA). Change if you're elsewhere.",
+            )
+        with s2:
+            if st.button("Use last delivery", use_container_width=True, key="dh_use_last"):
+                st.session_state.dh_empty_at = detected
+                st.rerun()
+        with s3:
+            if st.button("Central GA", use_container_width=True, key="dh_use_ga"):
+                st.session_state.dh_empty_at = DEFAULT_DELIVERY_ZONE
+                st.rerun()
+
+    empty_at = st.session_state.get("dh_empty_at") or detected
+    empty_home = estimate_empty_home_miles(empty_at, TARGET_LANE_ORIGIN)
+    pure_empty_fuel = empty_home * FUEL_COST_PER_MILE
+
+    h1, h2, h3 = st.columns(3)
+    h1.metric("Empty near", empty_at[:28] + ("…" if len(empty_at) > 28 else ""))
+    h2.metric("Empty home (est.)", f"{empty_home:.0f} mi")
+    h3.metric("Fuel if pure empty", f"${pure_empty_fuel:,.0f}")
+    st.caption(
+        f"Home corridor: **{TARGET_LANE_ORIGIN}** · Baseline bulk ~**${DEFAULT_LANE_BASELINE_PER_TON:g}/ton**. "
+        "Estimates are corridor heuristics — not GPS routes."
+    )
+
+    left, right = st.columns([1.2, 1])
 
     with left:
-        st.markdown("##### Score this return")
+        st.markdown("##### Score a broker offer")
         r1, r2 = st.columns(2)
         ret_origin = r1.text_input(
-            "Pickup (where you'd load)",
-            value=empty_at if "georgia" in empty_at.lower() or "ga" in empty_at.lower() else "Central Georgia",
+            "Pickup",
+            value="Central Georgia",
             key="dh_origin",
-            help="Closer to where you are empty = higher proximity score",
         )
         ret_dest = r2.text_input(
-            "Destination (toward home)",
+            "Drop (toward home)",
             value="Spruce Pine / Asheville, NC",
             key="dh_dest",
-            help="Western NC / Spruce Pine corridor scores highest",
         )
-        r3, r4 = st.columns(2)
-        ret_commodity = r3.text_input(
+        r3, r4, r5 = st.columns(3)
+        ret_commodity = r3.selectbox(
             "Commodity",
-            value="Feldspar",
+            ["Feldspar", "Aggregate", "Sand", "Gravel", "Clay", "Lime", "Other"],
             key="dh_commodity",
-            help="End-dump minerals/aggregates score best",
         )
-        ret_rate = r4.text_input(
-            "Rate ($/ton preferred)",
-            value="45",
-            key="dh_rate",
-            help=f"Compared to lane baseline ~$48/ton",
-        )
+        ret_rate = r4.text_input("Rate ($/ton)", value="45", key="dh_rate")
+        ret_tons = r5.number_input("Tons", min_value=1.0, max_value=30.0, value=24.0, step=0.5, key="dh_tons")
+
         scored = score_return_load(
             origin=ret_origin,
             destination=ret_dest,
@@ -1643,84 +1669,119 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
             current_location=empty_at,
             home=TARGET_LANE_ORIGIN,
         )
+        benefit = estimate_return_benefit(
+            scored,
+            origin=ret_origin,
+            destination=ret_dest,
+            current_location=empty_at,
+            home=TARGET_LANE_ORIGIN,
+            weight_tons=float(ret_tons),
+            fuel_cost_per_mile=FUEL_COST_PER_MILE,
+        )
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Score", f"{scored.score}")
-        m2.metric("Grade", scored.grade)
-        m3.metric("Call", scored.label[:22] + ("…" if len(scored.label) > 22 else ""))
+        # Result card
+        if scored.grade in ("A", "B"):
+            st.success(f"**{scored.grade} · {scored.score}/100** — {scored.label}")
+        elif scored.grade == "C":
+            st.warning(f"**{scored.grade} · {scored.score}/100** — {scored.label}")
+        else:
+            st.error(f"**{scored.grade} · {scored.score}/100** — {scored.label}")
 
-        b1, b2, b3, b4 = st.columns(4)
-        b1.metric("Proximity", f"{scored.proximity_pts}/25")
-        b2.metric("Homebound", f"{scored.direction_pts}/35")
-        b3.metric("Dump fit", f"{scored.commodity_pts}/20")
-        b4.metric("Rate", f"{scored.rate_pts}/20")
+        b1, b2, b3 = st.columns(3)
+        b1.metric("Est. revenue", f"${benefit['est_revenue']:,.0f}")
+        b2.metric("Fuel to shipper", f"${benefit['extra_empty_fuel']:,.0f}")
+        b3.metric(
+            "Net vs pure empty",
+            f"${benefit['net_benefit_vs_empty']:,.0f}",
+            help="Rough: return revenue minus fuel burned empty to that pickup",
+        )
+        st.caption(benefit["blurb"])
 
-        st.markdown("**Why this score**")
-        for reason in scored.reasons:
-            st.markdown(f"- {reason}")
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Near me", f"{scored.proximity_pts}/25")
+        p2.metric("Homebound", f"{scored.direction_pts}/35")
+        p3.metric("Dump fit", f"{scored.commodity_pts}/20")
+        p4.metric("Rate", f"{scored.rate_pts}/20")
 
-        if st.button("Log this as potential load", use_container_width=True, key="dh_to_logger"):
-            prefill_load_logger(
-                shipper="",
-                commodity=ret_commodity,
-                origin=ret_origin,
-                destination=ret_dest,
-                status="Potential",
-                notes=f"Deadhead return candidate · grade {scored.grade} · score {scored.score}",
-            )
+        with st.expander("Why this score", expanded=False):
+            for reason in scored.reasons:
+                st.markdown(f"- {reason}")
+
+        cta1, cta2 = st.columns(2)
+        with cta1:
+            if st.button("Log as potential load", type="primary", use_container_width=True, key="dh_to_logger"):
+                prefill_load_logger(
+                    shipper="",
+                    commodity=ret_commodity if ret_commodity != "Other" else "Aggregate",
+                    origin=ret_origin,
+                    destination=ret_dest,
+                    weight=float(ret_tons),
+                    rate_per_ton=float(str(ret_rate).replace("/ton", "").strip() or 0) or None,
+                    status="Potential",
+                    notes=(
+                        f"Return home · grade {scored.grade} ({scored.score}) · "
+                        f"est net ${benefit['net_benefit_vs_empty']:,.0f} vs empty"
+                    ),
+                )
+        with cta2:
+            if st.button("Open Board tab", use_container_width=True, key="dh_to_board"):
+                navigate_to_tab("Board")
 
     with right:
-        st.markdown("##### Ranked from your board")
+        st.markdown("##### Best returns on your board")
         try:
             with closing(get_connection()) as conn:
                 opp_df = pd.read_sql_query(
-                    "SELECT * FROM opportunities ORDER BY created_at DESC LIMIT 30",
+                    "SELECT * FROM opportunities ORDER BY created_at DESC LIMIT 40",
                     conn,
                 )
         except Exception:
             opp_df = pd.DataFrame()
 
         if opp_df.empty:
-            st.info(
-                "No board rows yet. Add opportunities on **Board**, or score a call-in on the left."
-            )
-            st.caption(
-                "Tip: paste broker offers with city + commodity + $/ton — rank updates automatically."
-            )
+            st.info("No board rows yet — score a call-in on the left, or add offers on **Board**.")
         else:
             ranked = rank_return_candidates(
                 opportunities_as_candidates(opp_df),
                 home=TARGET_LANE_ORIGIN,
                 current_location=empty_at,
-            )[:6]
-            for cand, sc in ranked:
+            )[:5]
+            for i, (cand, sc) in enumerate(ranked):
+                ben = estimate_return_benefit(
+                    sc,
+                    origin=str(cand.get("origin") or ""),
+                    destination=str(cand.get("destination") or cand.get("lane") or ""),
+                    current_location=empty_at,
+                    home=TARGET_LANE_ORIGIN,
+                    fuel_cost_per_mile=FUEL_COST_PER_MILE,
+                )
                 lane = cand.get("lane") or f"{cand.get('origin')} → {cand.get('destination')}"
+                icon = "🟢" if sc.grade in ("A", "B") else ("🟡" if sc.grade == "C" else "🔴")
                 st.markdown(
-                    f"**{sc.grade} · {sc.score}** &nbsp; {lane}  \n"
-                    f"{cand.get('commodity') or '—'} · {cand.get('rate') or 'rate n/a'}"
+                    f"{icon} **{sc.grade} {sc.score}** · {lane}  \n"
+                    f"{cand.get('commodity') or '—'} · {cand.get('rate') or 'n/a'} · "
+                    f"**~${ben['net_benefit_vs_empty']:,.0f}** vs empty"
                 )
-                st.caption(
-                    f"{sc.label} · Prox {sc.proximity_pts} · Home {sc.direction_pts} · "
-                    f"Fit {sc.commodity_pts} · Rate {sc.rate_pts}"
-                )
+                st.caption(sc.label)
+                if st.button("Use this", key=f"dh_use_{i}", use_container_width=True):
+                    prefill_load_logger(
+                        shipper=str(cand.get("contact") or ""),
+                        commodity=str(cand.get("commodity") or "Aggregate"),
+                        origin=str(cand.get("origin") or empty_at),
+                        destination=str(cand.get("destination") or ""),
+                        status="Potential",
+                        notes=f"Board return · {sc.grade} {sc.score} · {lane}",
+                    )
                 st.divider()
 
-    with st.expander("How scoring works (transparent rules)", expanded=False):
+    with st.expander("Limits of this v1 helper", expanded=False):
         st.markdown(
             """
-**Four buckets (100 pts max)**
+**What it does well:** ranks *near me* + *toward home* + *end-dump fit* + *rate vs ~$48/ton* in plain language.
 
-| Bucket | Max | What it asks |
-|--------|-----|----------------|
-| Proximity | 25 | Can I pick up near Central GA after delivery? |
-| Homebound | 35 | Does the drop pull me toward Spruce Pine / W NC? |
-| Dump fit | 20 | Will a 39ft end-dump haul this commodity? |
-| Rate | 20 | Is $/ton (or RPM) respectable vs lane baseline (~$48/t)? |
+**What it does *not* do yet:** real road miles, plant wait time, live load boards, or multi-stop optimization.
 
-**Grades:** A ≥80 book it · B ≥65 worth the call · C ≥50 borderline · D empty may be cleaner
-
-**v1 limits:** keyword geography (not turn-by-turn miles), no live broker feed, no wait-time at plant.
-**v2 ideas:** real empty-mile estimate from GPS, historical lane win-rate, DAT/Truckstop pull, multi-stop.
+**v2 worth building:** GPS empty-mile calc, history of what *you* paid on returns, optional DAT/Truckstop feed.
             """
         )
 
@@ -2045,148 +2106,200 @@ def render_leads_crm_tab() -> None:
 
 
 def render_load_logger_tab() -> None:
-    st.subheader("Logger")
-    render_target_lane_banner()
+    """Fast bulk load logger — core fields first, extras optional."""
+    st.subheader("Log a load")
+    st.caption("Bulk / end-dump speed path — shipper · commodity · tons · $/ton · destination.")
 
     prefill = st.session_state.pop("load_prefill", {})
     if prefill:
         apply_load_prefill(prefill)
-        st.success("Rate Calculator values loaded — review and save when ready.")
+        st.success("Prefill loaded — confirm and save.")
 
     leads_df = fetch_leads()
-    shipper_options = ["— Free text —"] + (
-        leads_df["company"].tolist() if not leads_df.empty else []
-    )
+    loads_df_recent = fetch_loads()
 
-    commodity_options = list(APPROVED_COMMODITIES)
-    prefill_commodity = prefill.get("commodity", "Feldspar")
-    if prefill_commodity not in commodity_options:
-        prefill_commodity = "Other"
+    # Recent shippers from loads + CRM leads
+    recent_shippers: list[str] = []
+    if not loads_df_recent.empty and "shipper" in loads_df_recent.columns:
+        for s in loads_df_recent["shipper"].dropna().astype(str):
+            if s.strip() and s.strip() not in recent_shippers:
+                recent_shippers.append(s.strip())
+            if len(recent_shippers) >= 6:
+                break
+    lead_companies = leads_df["company"].astype(str).tolist() if not leads_df.empty else []
+    quick_shippers = []
+    for s in recent_shippers + lead_companies:
+        if s not in quick_shippers:
+            quick_shippers.append(s)
+    quick_shippers = quick_shippers[:8]
 
-    render_section_header("Log New Load", icon="📝")
-    row1a, row1b = st.columns(2)
-    pickup = row1a.date_input(
-        "Date",
-        value=prefill.get("pickup_date", date.today()),
-        key="load_pickup_date",
-    )
-    load_status = row1b.selectbox(
-        "Status",
-        LOAD_STATUS_OPTIONS,
-        index=LOAD_STATUS_OPTIONS.index(prefill.get("status", "Potential"))
-        if prefill.get("status") in LOAD_STATUS_OPTIONS
-        else 0,
-        key="load_status",
-    )
+    quick_commodities = ["Feldspar", "Quartz", "Mica", "Aggregate", "Sand", "Clay", "Lime"]
 
-    row2a, row2b = st.columns(2)
-    default_shipper_pick = prefill.get("shipper_pick", "— Free text —")
-    if default_shipper_pick not in shipper_options:
-        default_shipper_pick = "— Free text —"
-    shipper_pick = row2a.selectbox(
+    # --- Quick picks (1 tap) ---
+    if quick_shippers:
+        st.markdown("**Recent shippers**")
+        scols = st.columns(min(4, len(quick_shippers)))
+        for i, name in enumerate(quick_shippers[:4]):
+            if scols[i].button(name[:18], key=f"qs_{i}", use_container_width=True):
+                st.session_state.load_shipper_text = name
+                st.rerun()
+        if len(quick_shippers) > 4:
+            scols2 = st.columns(min(4, len(quick_shippers) - 4))
+            for i, name in enumerate(quick_shippers[4:8]):
+                if scols2[i].button(name[:18], key=f"qs2_{i}", use_container_width=True):
+                    st.session_state.load_shipper_text = name
+                    st.rerun()
+
+    st.markdown("**Common commodities**")
+    ccols = st.columns(len(quick_commodities))
+    for i, com in enumerate(quick_commodities):
+        if ccols[i].button(com, key=f"qc_{i}", use_container_width=True):
+            st.session_state.load_commodity = com
+            st.rerun()
+
+    st.markdown("---")
+    render_section_header("Core fields", icon="⚡")
+
+    # Defaults from session/prefill
+    default_shipper = st.session_state.get(
+        "load_shipper_text", prefill.get("shipper", "")
+    )
+    default_commodity = st.session_state.get(
+        "load_commodity", prefill.get("commodity", "Feldspar")
+    )
+    if default_commodity not in APPROVED_COMMODITIES and default_commodity not in quick_commodities:
+        if default_commodity not in APPROVED_COMMODITIES:
+            # keep as select index Other
+            pass
+
+    commodity_options = list(dict.fromkeys(quick_commodities + list(APPROVED_COMMODITIES)))
+    if default_commodity not in commodity_options:
+        commodity_options = [default_commodity] + commodity_options
+
+    # Row 1: shipper + destination (most typed)
+    shipper = st.text_input(
         "Shipper",
-        shipper_options,
-        index=shipper_options.index(default_shipper_pick),
-        key="load_shipper_pick",
+        value=default_shipper,
+        placeholder="Plant / broker name",
+        key="load_shipper_text",
     )
-    commodity = row2b.selectbox(
+    destination = st.text_input(
+        "Destination",
+        value=st.session_state.get(
+            "load_destination", prefill.get("destination", PRIMARY_LANE["destination"])
+        ),
+        placeholder="Receiver / city",
+        key="load_destination",
+    )
+
+    # Row 2: commodity + weight + rate (bulk core)
+    c1, c2, c3 = st.columns(3)
+    commodity = c1.selectbox(
         "Commodity",
         commodity_options,
-        index=commodity_options.index(prefill_commodity),
+        index=commodity_options.index(default_commodity)
+        if default_commodity in commodity_options
+        else 0,
         key="load_commodity",
     )
-
-    shipper = ""
-    if shipper_pick == "— Free text —":
-        shipper = st.text_input(
-            "Shipper name",
-            value=prefill.get("shipper", ""),
-            placeholder="Enter shipper / broker name",
-            key="load_shipper_text",
-        )
-    else:
-        shipper = shipper_pick
-
-    commodity_final = commodity
-    if commodity == "Other":
-        commodity_final = st.text_input(
-            "Specify commodity",
-            value=prefill.get("commodity_other", prefill.get("commodity", "")),
-            placeholder="e.g. Crushed glass (washout required)",
-            key="load_commodity_other",
-        )
-
-    row3a, row3b, row3c = st.columns(3)
-    weight = row3a.number_input(
+    weight = c2.number_input(
         "Weight (tons)",
         min_value=0.0,
         max_value=30.0,
-        value=float(prefill.get("weight", 24.0)),
+        value=float(st.session_state.get("load_weight", prefill.get("weight", 24.0))),
         step=0.5,
         key="load_weight",
     )
-    pricing_mode = row3b.selectbox(
-        "Price by",
-        ["Rate per ton", "Total revenue"],
-        index=0 if prefill.get("pricing_mode", "Rate per ton") == "Rate per ton" else 1,
-        key="load_pricing_mode",
-    )
-    if pricing_mode == "Rate per ton":
-        rate_input = row3c.number_input(
-            "Rate per ton ($)",
-            min_value=0.0,
-            value=float(prefill.get("rate_per_ton", PRIMARY_LANE["baseline_rate_per_ton"])),
-            step=0.25,
-            key="load_rate_per_ton",
-        )
-        revenue_input = 0.0
-    else:
-        revenue_input = row3c.number_input(
-            "Total revenue ($)",
-            min_value=0.0,
-            value=float(prefill.get("total_revenue", 0.0)),
-            step=1.0,
-            key="load_total_revenue",
-        )
-        rate_input = 0.0
-
-    destination = st.text_input(
-        "Destination",
-        value=prefill.get("destination", PRIMARY_LANE["destination"]),
-        placeholder=f"{PRIMARY_RECEIVER} / Kohler area",
-        key="load_destination",
-    )
-    notes = st.text_area(
-        "Notes",
-        value=prefill.get("notes", ""),
-        placeholder="Potential pickup window, tarp, washout, scale instructions…",
-        key="load_notes",
+    rate_input = c3.number_input(
+        "Rate $/ton",
+        min_value=0.0,
+        value=float(
+            st.session_state.get(
+                "load_rate_per_ton",
+                prefill.get("rate_per_ton", PRIMARY_LANE["baseline_rate_per_ton"]),
+            )
+        ),
+        step=0.25,
+        key="load_rate_per_ton",
     )
 
-    preview_commodity = commodity_final or commodity
+    pricing_mode = "Rate per ton"
+    revenue_input = 0.0
+    preview_commodity = commodity
     rate_preview, revenue_preview = resolve_rate_and_revenue(
-        weight, rate_input if pricing_mode == "Rate per ton" else None,
-        revenue_input if pricing_mode == "Total revenue" else None,
-        pricing_mode,
+        weight, rate_input, None, pricing_mode
     )
-    fit = score_trailer_fit(preview_commodity, weight, notes)
-
-    st.markdown("#### Trailer Fit Score")
-    fit_cols = st.columns([1, 3])
+    fit = score_trailer_fit(preview_commodity, weight, "")
     level = fit["level"]
-    if level == "High":
-        fit_cols[0].success(f"**{level}**")
-    elif level == "Medium":
-        fit_cols[0].warning(f"**{level}**")
-    else:
-        fit_cols[0].error(f"**{level}**")
-    fit_cols[1].markdown(
-        " · ".join(fit["reasons"])
-        + (f" · Est. **${rate_preview:.2f}/ton** · **${revenue_preview:,.0f}** total"
-           if rate_preview > 0 else "")
-    )
 
-    submitted = st.button("Save Load", type="primary", use_container_width=True, key="save_load_btn")
+    # Live summary strip (no extra clicks)
+    sum1, sum2, sum3, sum4 = st.columns(4)
+    sum1.metric("Total $", f"${revenue_preview:,.0f}")
+    sum2.metric("$/ton", f"${rate_preview:.2f}")
+    sum3.metric("Fit", level)
+    sum4.metric("Lane mi", f"{DEFAULT_LANE_MILES}")
+    st.caption(" · ".join(fit["reasons"][:2]))
+
+    # Optional extras collapsed — widgets still run so keys exist for save
+    with st.expander("More options (date, status, miles, notes)", expanded=bool(prefill.get("notes"))):
+        o1, o2 = st.columns(2)
+        pickup = o1.date_input(
+            "Date",
+            value=prefill.get("pickup_date", date.today()),
+            key="load_pickup_date",
+        )
+        _status_opts = ["Booked", "Potential", "Quoted", "Dispatched", "In Transit", "Delivered"]
+        _def_status = prefill.get("status", "Booked")
+        if _def_status not in _status_opts:
+            _def_status = "Booked"
+        load_status = o2.selectbox(
+            "Status",
+            _status_opts,
+            index=_status_opts.index(_def_status),
+            key="load_status_simple",
+        )
+        o3, o4 = st.columns(2)
+        origin = o3.text_input(
+            "Origin",
+            value=prefill.get("origin", PRIMARY_LANE["origin"]),
+            key="load_origin_opt",
+        )
+        miles = o4.number_input(
+            "Loaded miles",
+            min_value=0.0,
+            value=float(st.session_state.get("_load_prefill_miles", DEFAULT_LANE_MILES)),
+            step=5.0,
+            key="load_miles_opt",
+        )
+        notes = st.text_area(
+            "Notes",
+            value=prefill.get("notes", ""),
+            placeholder="Scale, tarp, washout, gate…",
+            key="load_notes",
+        )
+        pricing_alt = st.selectbox(
+            "Price by",
+            ["Rate per ton", "Total revenue"],
+            key="load_pricing_mode",
+        )
+        if pricing_alt == "Total revenue":
+            pricing_mode = "Total revenue"
+            revenue_input = st.number_input(
+                "Total revenue ($)",
+                min_value=0.0,
+                value=float(prefill.get("total_revenue", revenue_preview or 0.0)),
+                step=1.0,
+                key="load_total_revenue",
+            )
+            rate_preview, revenue_preview = resolve_rate_and_revenue(
+                weight, None, revenue_input, pricing_mode
+            )
+            rate_input = rate_preview
+
+    # Sync status key used elsewhere
+    st.session_state.load_status = load_status
+
+    submitted = st.button("Save load", type="primary", use_container_width=True, key="save_load_btn")
 
     if submitted:
         errors = validate_load_inputs(
@@ -2201,13 +2314,14 @@ def render_load_logger_tab() -> None:
             for err in errors:
                 st.error(err)
         else:
-            miles = float(
-                st.session_state.get("_load_prefill_miles", DEFAULT_LANE_MILES)
+            loaded_miles = float(miles)
+            deadhead = float(
+                st.session_state.get("_load_prefill_deadhead", DEFAULT_DEADHEAD_MILES)
             )
-            loaded_miles = float(
-                st.session_state.get("_load_prefill_loaded_miles", miles)
-            )
-            deadhead = max(0.0, miles - loaded_miles)
+            # If return load (origin not home), deadhead often smaller — keep simple
+            if origin and "spruce" not in str(origin).lower():
+                deadhead = min(deadhead, 80.0)
+            total_miles = loaded_miles + deadhead
             bol = generate_bol_number()
             try:
                 from lp_helpers.repositories.loads import insert_load
@@ -2221,15 +2335,15 @@ def render_load_logger_tab() -> None:
                             "shipper": shipper.strip(),
                             "commodity": preview_commodity.strip(),
                             "weight_tons": weight,
-                            "miles": miles,
+                            "miles": total_miles,
                             "loaded_miles": loaded_miles,
                             "deadhead_miles": deadhead,
                             "pickup_date": str(pickup),
-                            "origin": PRIMARY_LANE["origin"],
+                            "origin": str(origin or PRIMARY_LANE["origin"]),
                             "destination": destination,
                             "rate_per_ton": rate_preview,
                             "total_revenue": revenue_preview,
-                            "notes": notes,
+                            "notes": notes or "",
                             "status": load_status,
                         },
                         tenant_id=current_tenant_id(),
@@ -2247,23 +2361,24 @@ def render_load_logger_tab() -> None:
                 "weight_tons": weight,
                 "destination": destination,
                 "status": load_status,
-                "origin": PRIMARY_LANE["origin"],
+                "origin": str(origin or PRIMARY_LANE["origin"]),
             }
             lead_phone = None
             if not leads_df.empty:
-                match = leads_df[leads_df["company"].astype(str).str.lower() == shipper.strip().lower()]
+                match = leads_df[
+                    leads_df["company"].astype(str).str.lower() == shipper.strip().lower()
+                ]
                 if not match.empty:
                     lead_phone = str(match.iloc[0].get("phone", ""))
             notify_dispatcher_new_load(saved_load)
             maybe_auto_notify_load(saved_load, lead_phone)
             st.success(
-                f"Load saved — {load_status} · BOL {bol} · "
-                f"${revenue_preview:,.2f} · {level} trailer fit"
+                f"Saved · {load_status} · BOL {bol} · ${revenue_preview:,.0f} · {level} fit"
             )
             st.rerun()
 
     st.divider()
-    render_section_header("Recent Logged Loads", icon="📋")
+    render_section_header("Recent loads", icon="📋")
     loads_df = fetch_loads()
     lf1, lf2 = st.columns([1, 2])
     load_status_filter = lf1.selectbox(

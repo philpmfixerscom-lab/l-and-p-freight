@@ -509,3 +509,107 @@ def last_delivery_location(loads_df: Any) -> str | None:
         return str(dest) if dest else None
     except Exception:
         return None
+
+
+def estimate_empty_home_miles(
+    current_location: str = DEFAULT_DELIVERY_ZONE,
+    home: str = DEFAULT_HOME,
+) -> float:
+    """Rough empty miles if running home with no backhaul (keyword heuristic)."""
+    cur = _blob(current_location)
+    # Known lane: Central GA / Kohler ↔ Spruce Pine ~285 loaded; empty similar
+    if _hits(cur, GA_CORE) or _hits(cur, GA_WIDE) or "georgia" in cur or "kohler" in cur:
+        return 285.0
+    if _hits(cur, SC_NEAR):
+        return 200.0
+    if "nc" in cur or "north carolina" in cur:
+        return 80.0
+    return 250.0
+
+
+def estimate_empty_to_pickup(origin: str, current_location: str) -> float:
+    """Rough empty miles from current empty spot to candidate pickup."""
+    o = _blob(origin)
+    cur = _blob(current_location)
+    if _hits(o, GA_CORE) and (_hits(cur, GA_CORE) or _hits(cur, GA_WIDE)):
+        return 35.0
+    if _hits(o, GA_WIDE) and (_hits(cur, GA_CORE) or _hits(cur, GA_WIDE)):
+        return 75.0
+    if _hits(o, SC_NEAR):
+        return 120.0
+    if "nc" in o or "north carolina" in o:
+        return 220.0
+    return 100.0
+
+
+def estimate_loaded_toward_home(destination: str, home: str = DEFAULT_HOME) -> float:
+    """Rough loaded miles on the return leg toward home."""
+    d = _blob(destination)
+    if home.lower().split(",")[0] in d or _hits(d, HOME_CORE):
+        return 280.0
+    if _hits(d, HOME_CORRIDOR):
+        return 220.0
+    if _hits(d, HOME_STATE):
+        return 180.0
+    if _hits(d, HOME_NEAR_STATES):
+        return 150.0
+    return 120.0
+
+
+def estimate_return_benefit(
+    score: DeadheadScore,
+    *,
+    origin: str = "",
+    destination: str = "",
+    current_location: str = DEFAULT_DELIVERY_ZONE,
+    home: str = DEFAULT_HOME,
+    weight_tons: float = 24.0,
+    fuel_cost_per_mile: float = 0.85,
+) -> dict[str, Any]:
+    """Dollar/mile style benefit vs running empty all the way home.
+
+    v1 uses corridor heuristics — not GPS routing. Shown as estimates.
+    """
+    empty_home = estimate_empty_home_miles(current_location, home)
+    empty_to_pu = estimate_empty_to_pickup(origin, current_location)
+    loaded_mi = estimate_loaded_toward_home(destination, home)
+
+    # Remaining empty after drop if not fully home (simplified)
+    remaining_empty = max(0.0, empty_home - loaded_mi * 0.85) if score.direction_pts >= 18 else empty_home * 0.5
+
+    pure_empty_cost = empty_home * fuel_cost_per_mile
+    with_load_empty_cost = (empty_to_pu + remaining_empty) * fuel_cost_per_mile
+
+    rate_val = score.extras.get("rate_value")
+    rate_kind = score.extras.get("rate_kind") or "unknown"
+    revenue = 0.0
+    if rate_val is not None:
+        if rate_kind == "per_ton":
+            revenue = float(rate_val) * weight_tons
+        elif rate_kind == "per_mile":
+            revenue = float(rate_val) * loaded_mi
+        else:
+            revenue = float(rate_val)
+
+    fuel_saved_vs_empty = pure_empty_cost - with_load_empty_cost
+    net_vs_empty = revenue + fuel_saved_vs_empty  # revenue plus any fuel not burned empty
+    # More intuitive: net benefit = revenue - extra empty to shipper fuel
+    extra_empty_fuel = empty_to_pu * fuel_cost_per_mile
+    net_benefit = revenue - extra_empty_fuel
+
+    return {
+        "empty_home_mi": round(empty_home, 0),
+        "empty_to_pickup_mi": round(empty_to_pu, 0),
+        "loaded_return_mi": round(loaded_mi, 0),
+        "est_revenue": round(revenue, 0),
+        "extra_empty_fuel": round(extra_empty_fuel, 0),
+        "net_benefit_vs_empty": round(net_benefit, 0),
+        "fuel_cost_per_mile": fuel_cost_per_mile,
+        "weight_tons": weight_tons,
+        "blurb": (
+            f"Est. +${net_benefit:,.0f} vs pure empty home "
+            f"(~${revenue:,.0f} revenue − ~${extra_empty_fuel:,.0f} fuel to shipper)"
+            if revenue > 0
+            else f"Score-only · fill rate for $ estimate · empty home ~{empty_home:.0f} mi"
+        ),
+    }
