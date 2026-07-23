@@ -134,7 +134,17 @@ def test_multi_tenant_schema_and_repos(tmp_path, monkeypatch):
 
 
 def test_deadhead_return_scoring():
-    from lp_helpers.deadhead import rank_return_candidates, score_return_load
+    from lp_helpers.deadhead import (
+        EMPTY_LOCATION_PRESETS,
+        estimate_return_benefit,
+        rank_return_candidates,
+        score_return_load,
+    )
+
+    assert len(EMPTY_LOCATION_PRESETS) >= 5
+    labels = [p[0] for p in EMPTY_LOCATION_PRESETS]
+    assert "Central GA" in labels
+    assert "Last delivery" in labels
 
     good = score_return_load(
         origin="Macon, GA",
@@ -164,6 +174,47 @@ def test_deadhead_return_scoring():
         current_location="Central Georgia",
     )
     assert ranked[0][1].score >= ranked[-1][1].score
+
+    benefit = estimate_return_benefit(
+        good,
+        origin="Macon, GA",
+        destination="Spruce Pine, NC",
+        current_location="Central Georgia (Kohler area)",
+        weight_tons=24.0,
+    )
+    assert "net_benefit_vs_empty" in benefit
+    assert benefit["empty_home_mi"] > 0
+    assert "blurb" in benefit
+
+
+def test_load_board_includes_return_lanes():
+    from lp_helpers.load_board import NC_GA_MARKET_INTEL
+
+    lanes = " ".join(item["lane"] for item in NC_GA_MARKET_INTEL).lower()
+    assert "→" in lanes or "->" in lanes
+    # Homebound samples for deadhead ranking
+    assert any(
+        "spruce pine" in item["lane"].lower() and item["lane"].lower().index("ga") < item["lane"].lower().index("spruce")
+        for item in NC_GA_MARKET_INTEL
+        if "spruce" in item["lane"].lower() and "ga" in item["lane"].lower()
+    ) or any(
+        "asheville" in item["lane"].lower() or "hickory" in item["lane"].lower()
+        for item in NC_GA_MARKET_INTEL
+    )
+
+
+def test_driver_next_action_and_status_actions():
+    from lp_helpers.driver_mobile import STATUS_ACTIONS, _next_action_blurb
+
+    assert len(STATUS_ACTIONS) >= 3
+    statuses = {s for _, s, _ in STATUS_ACTIONS}
+    assert "Arrived" in statuses
+    assert "Delivered" in statuses
+    blurb = _next_action_blurb(
+        "In Transit",
+        {"origin": "Macon, GA", "destination": "Kohler, GA"},
+    )
+    assert "Kohler" in blurb or "deliver" in blurb.lower()
 
 
 def test_authz_and_telematics_port():

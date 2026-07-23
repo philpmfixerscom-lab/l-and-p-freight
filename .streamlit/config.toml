@@ -10,11 +10,11 @@ serverAddress = "127.0.0.1"
 serverPort = 8502
 
 [theme]
-base = "light"
-primaryColor = "#e85d04"
-backgroundColor = "#d4dce8"
-secondaryBackgroundColor = "#e8edf4"
-textColor = "#0f172a"
+base = "dark"
+primaryColor = "#FF6B00"
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+textColor = "#F1F5F9"
 font = "sans serif"
 
 [client]

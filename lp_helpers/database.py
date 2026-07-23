@@ -410,6 +410,29 @@ CREATE TABLE IF NOT EXISTS eld_events (
     payload TEXT,
     logged_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id TEXT,
+    detail TEXT,
+    actor TEXT DEFAULT 'system',
+    meta_json TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS load_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    load_id INTEGER,
+    bol_number TEXT,
+    kind TEXT NOT NULL DEFAULT 'other',
+    file_path TEXT NOT NULL,
+    original_name TEXT,
+    notes TEXT,
+    uploaded_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (load_id) REFERENCES loads(id)
+);
 """
 
 
@@ -538,7 +561,7 @@ _ALLOWED_TABLES = {
     "loads", "leads", "fuel", "telematics", "geofence_events", "call_logs",
     "maintenance", "sms_log", "compliance", "ai_suggestions", "app_settings",
     "assets", "settlements", "routes", "customers", "purchase_orders", "po_loads",
-    "eld_events",
+    "eld_events", "audit_log", "load_photos", "opportunities",
 }
 
 
@@ -1077,8 +1100,30 @@ def init_db() -> None:
             conn.execute("ALTER TABLE loads ADD COLUMN asset_id INTEGER")
         if "route_id" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN route_id INTEGER")
+        if "driver_name" not in load_cols:
+            conn.execute("ALTER TABLE loads ADD COLUMN driver_name TEXT")
+        if "trailer_name" not in load_cols:
+            conn.execute("ALTER TABLE loads ADD COLUMN trailer_name TEXT")
+
+        try:
+            from lp_helpers.audit_log import ensure_audit_table
+            from lp_helpers.load_photos import ensure_load_photos_table, ensure_photos_dir
+            from lp_helpers.fleet_view import ensure_fleet_columns, seed_fleet_if_empty
+
+            ensure_audit_table(conn)
+            ensure_load_photos_table(conn)
+            ensure_photos_dir()
+            ensure_fleet_columns(conn)
+            seed_fleet_if_empty(conn)
+        except Exception:
+            pass
 
         conn.commit()
+
+    try:
+        seed_assets()
+    except Exception:
+        pass
 
     migrate_legacy_databases()
     _migrate_legacy_phase1_db()

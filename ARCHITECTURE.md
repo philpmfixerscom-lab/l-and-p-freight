@@ -54,6 +54,22 @@ This keeps the long-haul product resilient if a helper is temporarily broken whi
 - `navigate_to_tab(name)` only writes `active_tab` (+ optional `nav_hint` / expander flags), then `st.rerun()`.
 - **Never** assign `st.session_state[<widget_key>]` after that widget has been instantiated in the same run (StreamlitAPIException).
 - Filters (`filter_*`) and form keys (`load_*`) are left intact when switching tabs.
+- Filter widgets bind **directly** to `filter_leads_*` / `filter_loads_*` (no dual `*_ui` keys).
+- Load Logger prefill is durable: `load_prefill` + `_load_prefill_pending` until Logger applies it.
+- Deadhead empty location: `dh_empty_at` (chips + optional custom text); survives tab switches.
+- Driver exit only clears `view_mode` → `dispatch` (preserves `active_tab` and drafts).
+
+### Session state map (app)
+
+| Key | Role |
+|-----|------|
+| `active_tab` | Dispatch section |
+| `view_mode` | `dispatch` \| `driver` |
+| `night_mode` | Theme (Driver View reads it) |
+| `filter_*` | Leads/loads list filters |
+| `load_*` | Logger draft fields |
+| `dh_*` | Deadhead empty location + score inputs |
+| `load_prefill` / `_load_prefill_pending` | Cross-tab logger prefill |
 
 Influenced by Streamlit session-state docs and fleet UIs (Samsara/Motive) that use explicit section nav rather than fragile tab-widget coupling.
 

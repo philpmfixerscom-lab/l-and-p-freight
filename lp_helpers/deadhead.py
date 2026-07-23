@@ -22,6 +22,16 @@ DEFAULT_HOME = "Spruce Pine, NC"
 DEFAULT_DELIVERY_ZONE = "Central Georgia (Kohler area)"
 DEFAULT_LANE_BASELINE_PER_TON = 48.0  # typical SP→GA bulk anchor
 
+# One-tap empty locations for the "I'm empty now" flow (label → scorer string)
+EMPTY_LOCATION_PRESETS: tuple[tuple[str, str], ...] = (
+    ("Last delivery", ""),  # resolved at runtime from loads
+    ("Central GA", DEFAULT_DELIVERY_ZONE),
+    ("Macon, GA", "Macon, GA"),
+    ("Augusta, GA", "Augusta, GA"),
+    ("SC Upstate", "Greenville / Spartanburg, SC"),
+    ("Already in NC", "Western NC"),
+)
+
 # --- Geography keyword rings (practical, not GIS) ---
 
 # Where the truck is now after a Kohler-area drop

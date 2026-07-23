@@ -179,6 +179,172 @@ def build_deadhead_chart(df: pd.DataFrame) -> go.Figure | None:
     return _safe_fig(fig, "No deadhead data")
 
 
+def compute_historical_rates(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """
+    Historical rate analytics grouped by lane, commodity, and shipper.
+
+    Returns dict of DataFrames with avg/min/max rate_per_ton, load counts, revenue.
+    """
+    empty = pd.DataFrame()
+    if df is None or df.empty:
+        return {"by_lane": empty, "by_commodity": empty, "by_shipper": empty, "by_lane_commodity": empty}
+
+    chart_df = df.copy()
+    for col in ("rate_per_ton", "total_revenue", "weight_tons", "loaded_miles", "miles"):
+        if col in chart_df.columns:
+            chart_df[col] = pd.to_numeric(chart_df[col], errors="coerce")
+
+    chart_df["lane"] = (
+        chart_df.get("origin", pd.Series(dtype=str)).fillna("?").astype(str)
+        + " → "
+        + chart_df.get("destination", pd.Series(dtype=str)).fillna("?").astype(str)
+    )
+    chart_df["loaded_miles"] = chart_df.get("loaded_miles", chart_df.get("miles")).fillna(
+        chart_df.get("miles", 0)
+    ).fillna(0)
+    chart_df["rpm"] = chart_df.apply(
+        lambda r: (
+            float(r["total_revenue"] or 0) / float(r["loaded_miles"])
+            if float(r.get("loaded_miles") or 0) > 0
+            else None
+        ),
+        axis=1,
+    )
+
+    def _agg(group_cols: list[str]) -> pd.DataFrame:
+        present = [c for c in group_cols if c in chart_df.columns]
+        if not present:
+            return empty
+        g = (
+            chart_df.groupby(present, dropna=False)
+            .agg(
+                loads=("rate_per_ton", "count"),
+                avg_rate_per_ton=("rate_per_ton", "mean"),
+                min_rate_per_ton=("rate_per_ton", "min"),
+                max_rate_per_ton=("rate_per_ton", "max"),
+                avg_rpm=("rpm", "mean"),
+                total_revenue=("total_revenue", "sum"),
+                total_tons=("weight_tons", "sum"),
+            )
+            .reset_index()
+            .sort_values("total_revenue", ascending=False)
+        )
+        for c in ("avg_rate_per_ton", "min_rate_per_ton", "max_rate_per_ton", "avg_rpm"):
+            if c in g.columns:
+                g[c] = g[c].round(2)
+        if "total_revenue" in g.columns:
+            g["total_revenue"] = g["total_revenue"].round(0)
+        if "total_tons" in g.columns:
+            g["total_tons"] = g["total_tons"].round(1)
+        return g
+
+    return {
+        "by_lane": _agg(["lane"]),
+        "by_commodity": _agg(["commodity"]),
+        "by_shipper": _agg(["shipper"]),
+        "by_lane_commodity": _agg(["lane", "commodity"]),
+    }
+
+
+def build_rate_history_chart(df: pd.DataFrame) -> go.Figure | None:
+    """Avg rate/ton over time by commodity."""
+    if df is None or df.empty:
+        return None
+    chart_df = df.copy()
+    chart_df["pickup_date"] = pd.to_datetime(chart_df.get("pickup_date"), errors="coerce")
+    chart_df["rate_per_ton"] = pd.to_numeric(chart_df.get("rate_per_ton"), errors="coerce")
+    chart_df = chart_df.dropna(subset=["pickup_date", "rate_per_ton"])
+    if chart_df.empty:
+        return None
+    if "commodity" not in chart_df.columns:
+        chart_df["commodity"] = "All"
+    monthly = (
+        chart_df.groupby(
+            [chart_df["pickup_date"].dt.to_period("M").astype(str), "commodity"],
+            as_index=False,
+        )["rate_per_ton"]
+        .mean()
+    )
+    monthly.columns = ["month", "commodity", "avg_rate"]
+    if monthly.empty:
+        return None
+    fig = px.line(
+        monthly,
+        x="month",
+        y="avg_rate",
+        color="commodity",
+        markers=True,
+        title="Historical Avg $/Ton by Commodity",
+        labels={"avg_rate": "$/ton", "month": "Month"},
+    )
+    return _safe_fig(fig, "No rate history")
+
+
+def build_shipper_rate_chart(by_shipper: pd.DataFrame) -> go.Figure | None:
+    if by_shipper is None or by_shipper.empty:
+        return None
+    top = by_shipper.head(12).sort_values("avg_rate_per_ton", ascending=True)
+    fig = px.bar(
+        top,
+        x="avg_rate_per_ton",
+        y="shipper",
+        orientation="h",
+        color="loads",
+        title="Avg $/Ton by Shipper",
+        labels={"avg_rate_per_ton": "$/ton", "shipper": "Shipper"},
+    )
+    return _safe_fig(fig, "No shipper rates")
+
+
+def render_historical_rate_section(filtered: pd.DataFrame) -> None:
+    """Embedded historical rate analytics (lane / commodity / shipper)."""
+    st.markdown(
+        '<div class="lf-section-header">📉 Historical Rates — Lane · Commodity · Shipper</div>',
+        unsafe_allow_html=True,
+    )
+    hist = compute_historical_rates(filtered)
+
+    t1, t2, t3, t4 = st.tabs(["By Lane", "By Commodity", "By Shipper", "Lane × Commodity"])
+    with t1:
+        if hist["by_lane"].empty:
+            st.caption("No lane rate history yet.")
+        else:
+            st.dataframe(hist["by_lane"], use_container_width=True, hide_index=True)
+    with t2:
+        if hist["by_commodity"].empty:
+            st.caption("No commodity rate history yet.")
+        else:
+            st.dataframe(hist["by_commodity"], use_container_width=True, hide_index=True)
+            fig = build_rate_history_chart(filtered)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+    with t3:
+        if hist["by_shipper"].empty:
+            st.caption("No shipper rate history yet.")
+        else:
+            st.dataframe(hist["by_shipper"], use_container_width=True, hide_index=True)
+            sfig = build_shipper_rate_chart(hist["by_shipper"])
+            if sfig:
+                st.plotly_chart(sfig, use_container_width=True)
+    with t4:
+        if hist["by_lane_commodity"].empty:
+            st.caption("No lane×commodity data yet.")
+        else:
+            st.dataframe(hist["by_lane_commodity"], use_container_width=True, hide_index=True)
+
+    # CSV export of full historical pivot
+    if not hist["by_lane_commodity"].empty:
+        csv = hist["by_lane_commodity"].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download lane×commodity rates (CSV)",
+            csv,
+            file_name="lp_historical_rates.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="hist_rates_csv",
+        )
+
+
 def render_analytics_page(
     fetch_loads: Callable[[], pd.DataFrame],
     render_page_header: Callable[[str, str], None],
@@ -244,6 +410,8 @@ def render_analytics_page(
             st.plotly_chart(dh_fig, use_container_width=True)
         else:
             st.caption("Deadhead chart unavailable.")
+
+    render_historical_rate_section(filtered)
 
     with st.expander("Raw filtered data"):
         st.dataframe(filtered, use_container_width=True, hide_index=True)

@@ -71,9 +71,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for long-term structure notes.
 | Feature | Dispatch | Driver |
 |---------|----------|--------|
 | Dashboard & KPIs | ✅ | — |
+| Historical rates (lane / commodity / shipper) | ✅ | — |
 | Leads CRM | ✅ | — |
 | Load Logger + SMS auto-alert | ✅ | — |
-| Load Board / BulkLoads intel | ✅ | — |
+| Load Board / BulkLoads live API (fallback intel) | ✅ | — |
+| Multi-trailer / multi-driver Fleet board | ✅ | — |
+| Scale ticket & condition photo upload (local paths) | ✅ | — |
+| PDF export — all contracts + full audit log | ✅ | — |
+| Rate quote & follow-up email/SMS templates | ✅ | — |
 | GPS + Traccar live | ✅ | ✅ |
 | BOL PDF generator | ✅ | — |
 | Twilio SMS / SMTP alerts | ✅ | Arrival log |
@@ -96,7 +101,31 @@ dispatch_phone = "+18284678218"
 auto_send_new_load = "1"
 ```
 
-**Alerts tab** → Send Test Alert · Auto SMS on new load · Auto SMS on Dispatched/In Transit
+**Alerts tab** → Send Test Alert · Auto SMS on new load · Auto SMS on Dispatched/In Transit · rate quote / follow-up templates
+
+### BulkLoads.com live postings
+
+Optional partner API — without a key the Board tab uses curated NC/GA end-dump intel:
+
+```toml
+[bulkloads]
+api_key = "your_partner_key"
+base_url = "https://api.bulkloads.com/v1"
+enabled = "1"
+origin_state = "NC"
+dest_state = "GA"
+```
+
+**Board tab** → **Refresh BulkLoads** syncs listings into `opportunities`.
+
+### Photos & exports
+
+| Path | Contents |
+|------|----------|
+| `./bol_photos/` | Scale tickets & condition photos (local file paths in DB) |
+| `./attachments/` | BOL PDFs, contracts summary, audit log PDFs, export ZIPs |
+
+**BOL tab** → upload photos · Export contracts PDF · Export audit log PDF · ZIP all contracts + audit.
 
 ---
 

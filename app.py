@@ -114,11 +114,12 @@ TAB_LABELS = [
     "👥 Leads",
     "📝 Logger",
     "📦 Board",
+    "🚛 Fleet",
     "🗺️ GPS",
     "📄 BOL",
     "📲 Alerts",
 ]
-TAB_KEYS = ["Dashboard", "Leads", "Logger", "Board", "GPS", "BOL", "Alerts"]
+TAB_KEYS = ["Dashboard", "Leads", "Logger", "Board", "Fleet", "GPS", "BOL", "Alerts"]
 
 FILTER_DEFAULTS: dict[str, str] = {
     "filter_leads_status": "All",
@@ -661,42 +662,103 @@ def interpolate_route(progress: float) -> tuple[float, float, str]:
 
 
 def inject_elite_dark_css() -> None:
-    """High-contrast dark mode overrides on top of lp_helpers theme."""
+    """Polish pass v2 — large orange actions, tight metric cards, mobile sidebar."""
     st.markdown(
         """
-        <style>
-        :root {
-            --lf-bg: #0a0e14;
-            --lf-card: #151d2b;
-            --lf-text: #f8fafc;
-            --lf-muted: #b8c5d9;
-            --lf-border: #3d5270;
-            --lf-orange: #ff8c42;
-            --lf-green: #5eead4;
-            --lf-blue: #7dd3fc;
-            --lf-red: #fb7185;
-            --lf-sidebar: #060a10;
-            --lf-shadow: rgba(0,0,0,0.35);
-        }
-        .stApp { background: var(--lf-bg) !important; }
-        div[data-testid="stMetric"] label { color: var(--lf-muted) !important; }
-        div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-            color: var(--lf-text) !important;
-        }
-        .stTextInput input, .stNumberInput input, .stTextArea textarea,
-        .stSelectbox > div > div {
-            background: var(--lf-card) !important;
-            color: var(--lf-text) !important;
-            border-color: var(--lf-border) !important;
-        }
-        .stDataFrame { border: 1px solid var(--lf-border); border-radius: 10px; }
-        .lf-gps-badge {
-            display: inline-block; padding: 0.25rem 0.65rem; border-radius: 20px;
-            font-size: 0.75rem; font-weight: 700; margin-right: 0.5rem;
-        }
-        .lf-gps-badge.live { background: rgba(94,234,212,0.15); color: var(--lf-green); }
-        .lf-gps-badge.sim { background: rgba(251,146,60,0.15); color: var(--lf-orange); }
-        </style>
+<style>
+/* === LAWSON FREIGHT — POLISH PASS v2 (Hover + Cards + Mobile) === */
+.stApp {
+    background: linear-gradient(180deg, #0a0f1c 0%, #0f172a 100%);
+}
+.main { background-color: #0f172a; color: #e2e8f0; }
+
+.main-header {
+    font-size: 2.4em;
+    background: linear-gradient(90deg, #FF9500, #FF6B00);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+}
+
+/* Large freight-visible buttons */
+.stButton > button,
+.stFormSubmitButton > button,
+.stDownloadButton > button {
+    width: 100% !important;
+    min-height: 3.4rem !important;
+    font-size: 1.15rem !important;
+    font-weight: 700 !important;
+    background: linear-gradient(90deg, #FF6B00, #FF9500) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 16px rgba(255, 107, 0, 0.4) !important;
+    transition: all 0.15s ease;
+}
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(255, 107, 0, 0.6) !important;
+}
+
+/* === METRICS & CARDS — Precise selectors + Hover === */
+div[data-testid="stMetric"] {
+    background: rgba(30, 41, 59, 0.92) !important;
+    border: 1px solid #334155 !important;
+    border-left: 5px solid #FF9500 !important; /* default; overridden dynamically */
+    border-radius: 12px !important;
+    padding: 0.85rem 1.05rem !important;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.25) !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s !important;
+}
+div[data-testid="stMetric"]:hover {
+    transform: translateY(-4px) !important;
+    box-shadow: 0 8px 24px rgba(103, 232, 249, 0.25) !important;
+}
+div[data-testid="stMetric"] label {
+    color: #94a3b8 !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    color: #67e8f9 !important;
+    font-weight: 800 !important;
+    font-size: 1.7rem !important;
+}
+
+/* Tighter layout */
+.block-container { padding-top: 1.1rem; padding-bottom: 1.4rem; }
+div[data-testid="stHorizontalBlock"] { gap: 0.7rem; }
+
+/* Mobile sidebar */
+@media (max-width: 768px) {
+    [data-testid="stSidebar"] { min-width: 280px !important; }
+    button[data-testid="stBaseButton-headerNoPadding"] {
+        background: rgba(255, 149, 0, 0.18) !important;
+        border-radius: 8px !important;
+        padding: 6px !important;
+    }
+}
+
+.stSidebar {
+    background: linear-gradient(180deg, #1e2937 0%, #0f172a 100%);
+    border-right: 2px solid #334155;
+}
+
+/* GPS status badges (app-specific) */
+.lf-gps-badge {
+    display: inline-block; padding: 0.25rem 0.65rem; border-radius: 20px;
+    font-size: 0.75rem; font-weight: 700; margin-right: 0.5rem;
+}
+.lf-gps-badge.live {
+    background: rgba(74, 222, 128, 0.15); color: #4ade80;
+    border: 1px solid rgba(74, 222, 128, 0.4);
+}
+.lf-gps-badge.sim {
+    background: rgba(255, 107, 0, 0.15); color: #FF9500;
+    border: 1px solid rgba(255, 107, 0, 0.4);
+}
+</style>
         """,
         unsafe_allow_html=True,
     )
@@ -804,6 +866,33 @@ def render_section_header(title: str, icon: str = "") -> None:
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
+
+def get_legal_risk(row: Any) -> tuple[str, str]:
+    """Rule-based CRM risk flag for dashboard borders (not legal advice).
+
+    Returns (message, risk_type) where risk_type is ``error`` | ``warning`` | ``ok``.
+    Uses only existing lead columns — does not alter schema or legal PDFs.
+    """
+    try:
+        data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        data = {}
+    status = str(data.get("status") or "").strip()
+    phone = str(data.get("phone") or "").strip()
+    company = str(data.get("company") or data.get("name") or "").strip()
+    last_contact = str(data.get("last_contact") or "").strip()
+    notes = str(data.get("notes") or data.get("lane_notes") or "").strip()
+
+    if not company:
+        return ("Missing company name", "error")
+    if status in ("Hot", "Active", "Negotiating", "Quoted") and not phone:
+        return ("Active pipeline lead missing phone", "error")
+    if status in ("Hot", "Active", "Negotiating") and not last_contact and not notes:
+        return ("Hot/active lead with no contact history", "error")
+    if status in ("Hot", "Active", "Negotiating") and not last_contact:
+        return ("No last contact date", "warning")
+    return ("OK", "ok")
+
 
 def validate_load_inputs(
     shipper: str,
@@ -1370,11 +1459,12 @@ def compute_quote_metrics(
 
 
 def apply_load_prefill(prefill: dict) -> None:
-    """Push Rate Calculator values into Load Logger widget session state."""
+    """Push Rate Calculator / deadhead / clone values into Load Logger session state."""
     if "pickup_date" in prefill:
         st.session_state.load_pickup_date = prefill["pickup_date"]
     if prefill.get("status") in LOAD_STATUS_OPTIONS:
         st.session_state.load_status = prefill["status"]
+        st.session_state.load_status_simple = prefill["status"]
     if prefill.get("shipper_pick"):
         st.session_state.load_shipper_pick = prefill["shipper_pick"]
     if "shipper" in prefill:
@@ -1382,28 +1472,42 @@ def apply_load_prefill(prefill: dict) -> None:
     if prefill.get("commodity") in APPROVED_COMMODITIES:
         st.session_state.load_commodity = prefill["commodity"]
     elif prefill.get("commodity"):
-        st.session_state.load_commodity = "Other"
-        st.session_state.load_commodity_other = prefill["commodity"]
+        # Prefer known quick commodities over Other when possible
+        com = str(prefill["commodity"])
+        st.session_state.load_commodity = com if com else "Other"
+        st.session_state.load_commodity_other = com
     if "weight" in prefill:
         st.session_state.load_weight = float(prefill["weight"])
     if prefill.get("pricing_mode"):
         st.session_state.load_pricing_mode = prefill["pricing_mode"]
-    if "rate_per_ton" in prefill:
-        st.session_state.load_rate_per_ton = float(prefill["rate_per_ton"])
+    if "rate_per_ton" in prefill and prefill["rate_per_ton"] is not None:
+        try:
+            st.session_state.load_rate_per_ton = float(prefill["rate_per_ton"])
+        except (TypeError, ValueError):
+            pass
     if "total_revenue" in prefill:
         st.session_state.load_total_revenue = float(prefill["total_revenue"])
     if "destination" in prefill:
         st.session_state.load_destination = prefill["destination"]
+    if "origin" in prefill:
+        st.session_state.load_origin_opt = prefill["origin"]
     if "notes" in prefill:
         st.session_state.load_notes = prefill["notes"]
     if "miles" in prefill:
         st.session_state["_load_prefill_miles"] = float(prefill["miles"])
+        st.session_state.load_miles_opt = float(prefill["miles"])
     if "loaded_miles" in prefill:
         st.session_state["_load_prefill_loaded_miles"] = float(prefill["loaded_miles"])
+        st.session_state.load_miles_opt = float(prefill["loaded_miles"])
+        st.session_state["_load_prefill_miles"] = float(prefill["loaded_miles"])
+    if "deadhead_miles" in prefill:
+        st.session_state["_load_prefill_deadhead"] = float(prefill["deadhead_miles"])
 
 
 def prefill_load_logger(**kwargs) -> None:
+    """Queue a durable prefill until Logger applies it (survives wrong-tab navigation)."""
     st.session_state.load_prefill = kwargs
+    st.session_state["_load_prefill_pending"] = True
     navigate_to_tab("Logger")
 
 
@@ -1581,8 +1685,88 @@ def render_target_lane_banner() -> None:
         )
 
 
+def _render_return_decision_card(
+    *,
+    scored: Any,
+    benefit: dict[str, Any],
+    lane: str,
+    commodity: str,
+    rate_display: str,
+    key_prefix: str,
+    on_use: Callable[[], None] | None = None,
+    show_buckets: bool = True,
+    expanded_why: bool = False,
+) -> None:
+    """Scannable go/no-go card for a return-load candidate."""
+    icon = "🟢" if scored.grade in ("A", "B") else ("🟡" if scored.grade == "C" else "🔴")
+    header = f"{icon} **{scored.grade} {scored.score}/100** — {scored.label}"
+    if scored.grade in ("A", "B"):
+        st.success(header)
+    elif scored.grade == "C":
+        st.warning(header)
+    else:
+        st.error(header)
+
+    st.markdown(f"**{lane}**")
+    empty_pu = benefit.get("empty_to_pickup_mi")
+    loaded_mi = benefit.get("loaded_return_mi")
+    if isinstance(empty_pu, (int, float)) and isinstance(loaded_mi, (int, float)):
+        st.caption(
+            f"{commodity or '—'} · {rate_display or 'n/a'} · "
+            f"empty→PU ~{empty_pu:.0f} mi · loaded ~{loaded_mi:.0f} mi"
+        )
+    else:
+        st.caption(f"{commodity or '—'} · {rate_display or 'n/a'}")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Est. revenue", f"${benefit.get('est_revenue', 0):,.0f}")
+    m2.metric("Fuel to shipper", f"${benefit.get('extra_empty_fuel', 0):,.0f}")
+    m3.metric(
+        "Net vs pure empty",
+        f"${benefit.get('net_benefit_vs_empty', 0):,.0f}",
+        help="Rough: return revenue minus fuel burned empty to that pickup",
+    )
+    st.caption(benefit.get("blurb", ""))
+
+    if show_buckets:
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Near me", f"{scored.proximity_pts}/25")
+        p2.metric("Homebound", f"{scored.direction_pts}/35")
+        p3.metric("Dump fit", f"{scored.commodity_pts}/20")
+        p4.metric("Rate", f"{scored.rate_pts}/20")
+
+    with st.expander("Why this score", expanded=expanded_why):
+        for reason in scored.reasons:
+            st.markdown(f"- {reason}")
+
+    if on_use is not None:
+        if st.button("Use this", key=f"{key_prefix}_use", use_container_width=True, type="primary"):
+            on_use()
+
+
+def _seed_return_board_if_empty() -> None:
+    """Ensure opportunities has return-lane samples so deadhead ranking is useful out of the box."""
+    try:
+        from lp_helpers.load_board import (
+            ensure_opportunities_table,
+            fetch_opportunities,
+            seed_lane_intel,
+        )
+
+        with closing(get_connection()) as conn:
+            ensure_opportunities_table(conn)
+            opp = fetch_opportunities(conn)
+            if opp is not None and not getattr(opp, "empty", True) and len(opp) >= 3:
+                return
+            seed_lane_intel(conn)
+            conn.commit()
+        clear_data_caches()
+    except Exception:
+        pass
+
+
 def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
-    """Primary Dashboard panel: I'm empty now → score returns with $ benefit."""
+    """Primary Dashboard panel: I'm empty now → ranked returns + decision cards."""
     st.markdown("---")
     render_section_header("I'm empty — find a return home", icon="🔄")
 
@@ -1590,6 +1774,7 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
         from lp_helpers.deadhead import (
             DEFAULT_DELIVERY_ZONE,
             DEFAULT_LANE_BASELINE_PER_TON,
+            EMPTY_LOCATION_PRESETS,
             estimate_empty_home_miles,
             estimate_return_benefit,
             last_delivery_location,
@@ -1601,35 +1786,46 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
         st.warning(f"Deadhead helper unavailable: {exc}")
         return
 
+    _seed_return_board_if_empty()
+
     detected = last_delivery_location(loads_df) or DEFAULT_DELIVERY_ZONE
     if "dh_empty_at" not in st.session_state:
         st.session_state.dh_empty_at = detected
 
-    # --- I'm empty now strip ---
-    strip = st.container()
-    with strip:
-        s1, s2, s3 = st.columns([2, 1.2, 1])
-        with s1:
-            empty_at = st.text_input(
-                "I'm empty near",
-                key="dh_empty_at",
-                help="Usually last delivery (Central GA). Change if you're elsewhere.",
+    # --- Empty-now chips (1–2 taps) ---
+    st.markdown("**Where are you empty?**")
+    chip_cols = st.columns(len(EMPTY_LOCATION_PRESETS))
+    for i, (label, value) in enumerate(EMPTY_LOCATION_PRESETS):
+        resolved = detected if label == "Last delivery" or not value else value
+        with chip_cols[i]:
+            is_active = (
+                st.session_state.get("dh_empty_at") == resolved
+                or (
+                    label == "Last delivery"
+                    and st.session_state.get("dh_empty_at") == detected
+                )
             )
-        with s2:
-            if st.button("Use last delivery", use_container_width=True, key="dh_use_last"):
-                st.session_state.dh_empty_at = detected
+            if st.button(
+                label,
+                key=f"dh_chip_{i}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                st.session_state.dh_empty_at = resolved
                 st.rerun()
-        with s3:
-            if st.button("Central GA", use_container_width=True, key="dh_use_ga"):
-                st.session_state.dh_empty_at = DEFAULT_DELIVERY_ZONE
-                st.rerun()
+
+    st.text_input(
+        "I'm empty near",
+        key="dh_empty_at",
+        help="Usually last delivery (Central GA). Chips above are faster.",
+    )
 
     empty_at = st.session_state.get("dh_empty_at") or detected
     empty_home = estimate_empty_home_miles(empty_at, TARGET_LANE_ORIGIN)
     pure_empty_fuel = empty_home * FUEL_COST_PER_MILE
 
     h1, h2, h3 = st.columns(3)
-    h1.metric("Empty near", empty_at[:28] + ("…" if len(empty_at) > 28 else ""))
+    h1.metric("Empty near", (empty_at[:28] + "…") if len(str(empty_at)) > 28 else empty_at)
     h2.metric("Empty home (est.)", f"{empty_home:.0f} mi")
     h3.metric("Fuel if pure empty", f"${pure_empty_fuel:,.0f}")
     st.caption(
@@ -1637,16 +1833,89 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
         "Estimates are corridor heuristics — not GPS routes."
     )
 
-    left, right = st.columns([1.2, 1])
+    # --- Ranked board returns first (decision-first UX) ---
+    st.markdown("##### Best returns on your board")
+    try:
+        with closing(get_connection()) as conn:
+            opp_df = pd.read_sql_query(
+                "SELECT * FROM opportunities ORDER BY created_at DESC LIMIT 40",
+                conn,
+            )
+    except Exception:
+        opp_df = pd.DataFrame()
 
-    with left:
-        st.markdown("##### Score a broker offer")
-        r1, r2 = st.columns(2)
-        ret_origin = r1.text_input(
-            "Pickup",
-            value="Central Georgia",
-            key="dh_origin",
+    if opp_df.empty:
+        st.info(
+            "No board rows yet — refresh market intel on **Board**, or score a call-in below."
         )
+    else:
+        ranked = rank_return_candidates(
+            opportunities_as_candidates(opp_df),
+            home=TARGET_LANE_ORIGIN,
+            current_location=empty_at,
+        )[:5]
+        for i, (cand, sc) in enumerate(ranked):
+            origin = str(cand.get("origin") or "")
+            dest = str(cand.get("destination") or cand.get("lane") or "")
+            ben = estimate_return_benefit(
+                sc,
+                origin=origin,
+                destination=dest,
+                current_location=empty_at,
+                home=TARGET_LANE_ORIGIN,
+                fuel_cost_per_mile=FUEL_COST_PER_MILE,
+            )
+            lane = cand.get("lane") or f"{origin} → {dest}"
+
+            def _use_cand(
+                c=cand,
+                score=sc,
+                benefit=ben,
+                ln=lane,
+                emp=empty_at,
+            ):
+                rate_raw = c.get("rate") or c.get("rate_per_ton")
+                rate_num = None
+                if rate_raw is not None:
+                    try:
+                        from lp_helpers.deadhead import _parse_rate
+
+                        rate_num, _ = _parse_rate(rate_raw)
+                    except Exception:
+                        rate_num = None
+                prefill_load_logger(
+                    shipper=str(c.get("contact") or ""),
+                    commodity=str(c.get("commodity") or "Aggregate"),
+                    origin=str(c.get("origin") or emp),
+                    destination=str(c.get("destination") or ""),
+                    rate_per_ton=rate_num,
+                    weight=24.0,
+                    status="Potential",
+                    notes=(
+                        f"Board return · {score.grade} {score.score} · {ln} · "
+                        f"est net ${benefit['net_benefit_vs_empty']:,.0f} vs empty"
+                    ),
+                    deadhead_miles=float(benefit.get("empty_to_pickup_mi") or 40),
+                    loaded_miles=float(benefit.get("loaded_return_mi") or 220),
+                )
+
+            with st.container():
+                _render_return_decision_card(
+                    scored=sc,
+                    benefit=ben,
+                    lane=str(lane),
+                    commodity=str(cand.get("commodity") or "—"),
+                    rate_display=str(cand.get("rate") or "n/a"),
+                    key_prefix=f"dh_board_{i}",
+                    on_use=_use_cand,
+                    show_buckets=False,
+                )
+                st.divider()
+
+    # --- Manual call-in scorer (secondary) ---
+    with st.expander("Score a broker call-in", expanded=False):
+        r1, r2 = st.columns(2)
+        ret_origin = r1.text_input("Pickup", value="Central Georgia", key="dh_origin")
         ret_dest = r2.text_input(
             "Drop (toward home)",
             value="Spruce Pine / Asheville, NC",
@@ -1659,7 +1928,9 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
             key="dh_commodity",
         )
         ret_rate = r4.text_input("Rate ($/ton)", value="45", key="dh_rate")
-        ret_tons = r5.number_input("Tons", min_value=1.0, max_value=30.0, value=24.0, step=0.5, key="dh_tons")
+        ret_tons = r5.number_input(
+            "Tons", min_value=1.0, max_value=30.0, value=24.0, step=0.5, key="dh_tons"
+        )
 
         scored = score_return_load(
             origin=ret_origin,
@@ -1679,102 +1950,53 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
             fuel_cost_per_mile=FUEL_COST_PER_MILE,
         )
 
-        # Result card
-        if scored.grade in ("A", "B"):
-            st.success(f"**{scored.grade} · {scored.score}/100** — {scored.label}")
-        elif scored.grade == "C":
-            st.warning(f"**{scored.grade} · {scored.score}/100** — {scored.label}")
-        else:
-            st.error(f"**{scored.grade} · {scored.score}/100** — {scored.label}")
+        def _use_manual():
+            try:
+                rate_f = float(str(ret_rate).replace("/ton", "").replace("$", "").strip() or 0) or None
+            except ValueError:
+                rate_f = None
+            prefill_load_logger(
+                shipper="",
+                commodity=ret_commodity if ret_commodity != "Other" else "Aggregate",
+                origin=ret_origin,
+                destination=ret_dest,
+                weight=float(ret_tons),
+                rate_per_ton=rate_f,
+                status="Potential",
+                notes=(
+                    f"Return home · grade {scored.grade} ({scored.score}) · "
+                    f"est net ${benefit['net_benefit_vs_empty']:,.0f} vs empty"
+                ),
+                deadhead_miles=float(benefit.get("empty_to_pickup_mi") or 40),
+                loaded_miles=float(benefit.get("loaded_return_mi") or 220),
+            )
 
-        b1, b2, b3 = st.columns(3)
-        b1.metric("Est. revenue", f"${benefit['est_revenue']:,.0f}")
-        b2.metric("Fuel to shipper", f"${benefit['extra_empty_fuel']:,.0f}")
-        b3.metric(
-            "Net vs pure empty",
-            f"${benefit['net_benefit_vs_empty']:,.0f}",
-            help="Rough: return revenue minus fuel burned empty to that pickup",
+        _render_return_decision_card(
+            scored=scored,
+            benefit=benefit,
+            lane=f"{ret_origin} → {ret_dest}",
+            commodity=ret_commodity,
+            rate_display=f"${ret_rate}/ton" if ret_rate else "n/a",
+            key_prefix="dh_manual",
+            on_use=_use_manual,
+            show_buckets=True,
+            expanded_why=True,
         )
-        st.caption(benefit["blurb"])
-
-        p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Near me", f"{scored.proximity_pts}/25")
-        p2.metric("Homebound", f"{scored.direction_pts}/35")
-        p3.metric("Dump fit", f"{scored.commodity_pts}/20")
-        p4.metric("Rate", f"{scored.rate_pts}/20")
-
-        with st.expander("Why this score", expanded=False):
-            for reason in scored.reasons:
-                st.markdown(f"- {reason}")
 
         cta1, cta2 = st.columns(2)
         with cta1:
-            if st.button("Log as potential load", type="primary", use_container_width=True, key="dh_to_logger"):
-                prefill_load_logger(
-                    shipper="",
-                    commodity=ret_commodity if ret_commodity != "Other" else "Aggregate",
-                    origin=ret_origin,
-                    destination=ret_dest,
-                    weight=float(ret_tons),
-                    rate_per_ton=float(str(ret_rate).replace("/ton", "").strip() or 0) or None,
-                    status="Potential",
-                    notes=(
-                        f"Return home · grade {scored.grade} ({scored.score}) · "
-                        f"est net ${benefit['net_benefit_vs_empty']:,.0f} vs empty"
-                    ),
-                )
+            if st.button(
+                "Log as potential load",
+                type="primary",
+                use_container_width=True,
+                key="dh_to_logger",
+            ):
+                _use_manual()
         with cta2:
             if st.button("Open Board tab", use_container_width=True, key="dh_to_board"):
                 navigate_to_tab("Board")
 
-    with right:
-        st.markdown("##### Best returns on your board")
-        try:
-            with closing(get_connection()) as conn:
-                opp_df = pd.read_sql_query(
-                    "SELECT * FROM opportunities ORDER BY created_at DESC LIMIT 40",
-                    conn,
-                )
-        except Exception:
-            opp_df = pd.DataFrame()
-
-        if opp_df.empty:
-            st.info("No board rows yet — score a call-in on the left, or add offers on **Board**.")
-        else:
-            ranked = rank_return_candidates(
-                opportunities_as_candidates(opp_df),
-                home=TARGET_LANE_ORIGIN,
-                current_location=empty_at,
-            )[:5]
-            for i, (cand, sc) in enumerate(ranked):
-                ben = estimate_return_benefit(
-                    sc,
-                    origin=str(cand.get("origin") or ""),
-                    destination=str(cand.get("destination") or cand.get("lane") or ""),
-                    current_location=empty_at,
-                    home=TARGET_LANE_ORIGIN,
-                    fuel_cost_per_mile=FUEL_COST_PER_MILE,
-                )
-                lane = cand.get("lane") or f"{cand.get('origin')} → {cand.get('destination')}"
-                icon = "🟢" if sc.grade in ("A", "B") else ("🟡" if sc.grade == "C" else "🔴")
-                st.markdown(
-                    f"{icon} **{sc.grade} {sc.score}** · {lane}  \n"
-                    f"{cand.get('commodity') or '—'} · {cand.get('rate') or 'n/a'} · "
-                    f"**~${ben['net_benefit_vs_empty']:,.0f}** vs empty"
-                )
-                st.caption(sc.label)
-                if st.button("Use this", key=f"dh_use_{i}", use_container_width=True):
-                    prefill_load_logger(
-                        shipper=str(cand.get("contact") or ""),
-                        commodity=str(cand.get("commodity") or "Aggregate"),
-                        origin=str(cand.get("origin") or empty_at),
-                        destination=str(cand.get("destination") or ""),
-                        status="Potential",
-                        notes=f"Board return · {sc.grade} {sc.score} · {lane}",
-                    )
-                st.divider()
-
-    with st.expander("Limits of this v1 helper", expanded=False):
+    with st.expander("Limits of this helper", expanded=False):
         st.markdown(
             """
 **What it does well:** ranks *near me* + *toward home* + *end-dump fit* + *rate vs ~$48/ton* in plain language.
@@ -1787,43 +2009,169 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
 
 
 def render_dashboard_tab() -> None:
-    st.subheader("Dashboard")
+    # ========== DASHBOARD ==========
+    st.header("LAWSON FREIGHT — OPERATIONS DASHBOARD")
+    st.caption(
+        f"Today: {datetime.now().strftime('%A, %B %d, %Y')} | "
+        "Spruce Pine Strong | Owner-First Execution"
+    )
 
-    leads_df = fetch_leads()
-    loads_df = fetch_loads()
-    metrics = compute_dashboard_metrics(leads_df, loads_df)
+    # Loading spinner while fetching live ops data for metrics
+    with st.spinner("Loading ops data…"):
+        leads_df = fetch_leads()
+        loads_df = fetch_loads()
+        metrics = compute_dashboard_metrics(leads_df, loads_df)
+
+        # Dynamic risk-based metrics (schema-safe: total_revenue fallback for total_amount)
+        total_leads = len(leads_df)
+        if not loads_df.empty and "status" in loads_df.columns:
+            booked = int(
+                loads_df["status"]
+                .astype(str)
+                .str.contains("Booked|Delivered|Paid", na=False, regex=True)
+                .sum()
+            )
+            amount_col = (
+                "total_amount"
+                if "total_amount" in loads_df.columns
+                else "total_revenue"
+            )
+            logged_mask = loads_df["status"].astype(str).eq("Logged")
+            if amount_col in loads_df.columns and logged_mask.any():
+                pipeline = float(
+                    loads_df.loc[logged_mask, amount_col].fillna(0).sum()
+                )
+            else:
+                pipeline = 0.0
+        else:
+            booked = 0
+            pipeline = 0.0
+        # Include Contacted/Active — app statuses; "Called Today" kept for future parity
+        active_statuses = [
+            "New",
+            "Called Today",
+            "Contacted",
+            "Active",
+            "Negotiating",
+        ]
+        if not leads_df.empty and "status" in leads_df.columns:
+            active = int(
+                leads_df["status"].astype(str).isin(active_statuses).sum()
+            )
+        else:
+            active = 0
+
+        # Compute high-risk lead count for border logic
+        high_risk_count = 0
+        if not leads_df.empty:
+            for _, row in leads_df.iterrows():
+                _, risk_type = get_legal_risk(row)
+                if risk_type == "error":
+                    high_risk_count += 1
 
     render_target_lane_banner()
-
     st.info(f"**{CARRIER_NAME} Mission:** {MISSION_BLURB}")
 
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    st.markdown('<div class="lf-dash-kpi-marker"></div>', unsafe_allow_html=True)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("🔥 Hot Leads", total_leads, delta="Call today")
+    with col2:
+        st.metric("📦 Loads Booked", booked)
+    with col3:
+        st.metric("💰 Pipeline", f"${pipeline:,.0f}")
+    with col4:
+        st.metric("🤝 Active / Negotiating", active)
+
+    # Optional streamlit-extras card chrome (pure CSS remains the reliable fallback)
+    if st.session_state.get("_has_streamlit_extras"):
+        try:
+            from streamlit_extras.metric_cards import style_metric_cards
+
+            style_metric_cards(
+                background_color="#1e2937",
+                border_left_color="#FF9500",
+                border_color="#334155",
+                border_radius_px=12,
+                box_shadow=True,
+            )
+        except Exception:
+            pass
+
+    # Dynamic left-border color coding based on real risk + pipeline health
+    lead_border = (
+        "#4ade80"
+        if total_leads >= 4 and high_risk_count == 0
+        else ("#fbbf24" if high_risk_count > 0 else "#FF9500")
+    )
+    booked_border = "#4ade80" if booked > 0 else "#FF9500"
+    pipeline_border = "#4ade80" if pipeline > 0 else "#f87171"
+    active_border = "#67e8f9" if active > 0 else "#94a3b8"
+
+    st.markdown(
+        f"""
+<style>
+/* Precise metric card selectors + dynamic risk borders */
+div[data-testid="stMetric"]:nth-of-type(1) {{
+    border-left: 5px solid {lead_border} !important;
+}}
+div[data-testid="stMetric"]:nth-of-type(2) {{
+    border-left: 5px solid {booked_border} !important;
+}}
+div[data-testid="stMetric"]:nth-of-type(3) {{
+    border-left: 5px solid {pipeline_border} !important;
+}}
+div[data-testid="stMetric"]:nth-of-type(4) {{
+    border-left: 5px solid {active_border} !important;
+}}
+/* Column-scoped fallback (Streamlit nests one stMetric per column) */
+div[data-testid="stElementContainer"]:has(.lf-dash-kpi-marker) + div[data-testid="stElementContainer"]
+  div[data-testid="stHorizontalBlock"] > div:nth-child(1) div[data-testid="stMetric"] {{
+    border-left: 5px solid {lead_border} !important;
+}}
+div[data-testid="stElementContainer"]:has(.lf-dash-kpi-marker) + div[data-testid="stElementContainer"]
+  div[data-testid="stHorizontalBlock"] > div:nth-child(2) div[data-testid="stMetric"] {{
+    border-left: 5px solid {booked_border} !important;
+}}
+div[data-testid="stElementContainer"]:has(.lf-dash-kpi-marker) + div[data-testid="stElementContainer"]
+  div[data-testid="stHorizontalBlock"] > div:nth-child(3) div[data-testid="stMetric"] {{
+    border-left: 5px solid {pipeline_border} !important;
+}}
+div[data-testid="stElementContainer"]:has(.lf-dash-kpi-marker) + div[data-testid="stElementContainer"]
+  div[data-testid="stHorizontalBlock"] > div:nth-child(4) div[data-testid="stMetric"] {{
+    border-left: 5px solid {active_border} !important;
+}}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # Operational KPIs (mission: loaded miles / empty risk)
+    kpi5, kpi6, kpi7, kpi8 = st.columns(4)
     loaded_pct = metrics["loaded_share"]
     loaded_delta = (
         f"{(loaded_pct - LOADED_MILE_TARGET):.0%} vs target"
         if loaded_pct > 0
         else f"Target {LOADED_MILE_TARGET:.0%}"
     )
-    kpi1.metric(
+    kpi5.metric(
         "Loaded Mile Share",
         f"{loaded_pct:.0%}",
         delta=loaded_delta,
         delta_color="normal" if loaded_pct >= LOADED_MILE_TARGET else "inverse",
         help=f"Target ≥ {LOADED_MILE_TARGET:.0%} loaded miles — empty miles kill margin",
     )
-    kpi2.metric("Pipeline Revenue", f"${metrics['pipeline_revenue']:,.0f}")
-    kpi3.metric(
+    kpi6.metric(
         "Deadhead Miles",
         f"{metrics['deadhead_miles']:,.0f}",
         help="Empty miles on logged loads — minimize for margin",
     )
-    kpi4.metric("Avg Rate / Ton", f"${metrics['avg_rate_per_ton']:.2f}")
-
-    kpi5, kpi6, kpi7, kpi8 = st.columns(4)
-    kpi5.metric("Hot / Active Leads", metrics["hot_leads"])
-    kpi6.metric("Loads Logged", metrics["loads_logged"])
-    kpi7.metric("In Transit / Dispatched", metrics["in_transit"])
-    kpi8.metric("Primary Receiver", PRIMARY_RECEIVER[:16])
+    kpi7.metric("Avg Rate / Ton", f"${metrics['avg_rate_per_ton']:.2f}")
+    kpi8.metric("In Transit / Dispatched", metrics["in_transit"])
 
     with st.expander("🚨 Emergency Dispatch", expanded=False):
         _render_emergency_controls(key_prefix="dash_em", compact=True)
@@ -1888,6 +2236,13 @@ def render_dashboard_tab() -> None:
                 dh_fig = build_deadhead_chart(loads_df)
                 if dh_fig:
                     st.plotly_chart(dh_fig, use_container_width=True)
+
+            try:
+                from lp_helpers.analytics_dashboard import render_historical_rate_section
+
+                render_historical_rate_section(loads_df)
+            except Exception as exc:
+                log.warning("Historical rate analytics unavailable: %s", exc)
         except ImportError:
             if px is not None and "total_revenue" in loads_df.columns:
                 fig = px.bar(
@@ -1995,25 +2350,20 @@ def render_leads_crm_tab() -> None:
         return
 
     fc1, fc2 = st.columns([1, 2])
+    # Bind filters to filter_* keys (single source of truth; survives tab switches)
+    if "filter_leads_status" not in st.session_state:
+        st.session_state.filter_leads_status = "All"
+    if "filter_leads_search" not in st.session_state:
+        st.session_state.filter_leads_search = ""
     status_filter = fc1.selectbox(
         "Filter by status",
         ["All"] + LEAD_STATUS_OPTIONS,
-        index=(["All"] + LEAD_STATUS_OPTIONS).index(
-            st.session_state.get("filter_leads_status", "All")
-        )
-        if st.session_state.get("filter_leads_status", "All") in ["All"] + LEAD_STATUS_OPTIONS
-        else 0,
-        key="leads_status_filter_ui",
+        key="filter_leads_status",
     )
     search = fc2.text_input(
         "Search company / notes",
-        value=st.session_state.get("filter_leads_search", ""),
-        key="leads_search_ui",
+        key="filter_leads_search",
     )
-    if status_filter != st.session_state.get("filter_leads_status"):
-        save_filter("filter_leads_status", status_filter)
-    if search != st.session_state.get("filter_leads_search"):
-        save_filter("filter_leads_search", search)
 
     filtered = leads_df.copy()
     if status_filter != "All":
@@ -2110,32 +2460,102 @@ def render_load_logger_tab() -> None:
     st.subheader("Log a load")
     st.caption("Bulk / end-dump speed path — shipper · commodity · tons · $/ton · destination.")
 
-    prefill = st.session_state.pop("load_prefill", {})
-    if prefill:
+    # Durable prefill: keep until applied on Logger (survives wrong-tab navigation)
+    prefill: dict = {}
+    if st.session_state.get("_load_prefill_pending") and st.session_state.get("load_prefill"):
+        prefill = dict(st.session_state.load_prefill)
         apply_load_prefill(prefill)
+        st.session_state["_load_prefill_pending"] = False
+        st.session_state.pop("load_prefill", None)
         st.success("Prefill loaded — confirm and save.")
+    elif st.session_state.get("load_prefill") and not st.session_state.get("_load_prefill_pending"):
+        # Legacy path: one-shot prefill dict
+        prefill = st.session_state.pop("load_prefill", {}) or {}
+        if prefill:
+            apply_load_prefill(prefill)
+            st.success("Prefill loaded — confirm and save.")
 
     leads_df = fetch_leads()
     loads_df_recent = fetch_loads()
 
-    # Recent shippers from loads + CRM leads
+    # Frequency-ranked shippers from loads, then CRM leads
     recent_shippers: list[str] = []
     if not loads_df_recent.empty and "shipper" in loads_df_recent.columns:
-        for s in loads_df_recent["shipper"].dropna().astype(str):
-            if s.strip() and s.strip() not in recent_shippers:
-                recent_shippers.append(s.strip())
-            if len(recent_shippers) >= 6:
-                break
+        counts = (
+            loads_df_recent["shipper"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .value_counts()
+        )
+        recent_shippers = [s for s in counts.index.tolist() if s][:8]
     lead_companies = leads_df["company"].astype(str).tolist() if not leads_df.empty else []
-    quick_shippers = []
+    quick_shippers: list[str] = []
     for s in recent_shippers + lead_companies:
-        if s not in quick_shippers:
+        s = str(s).strip()
+        if s and s not in quick_shippers:
             quick_shippers.append(s)
     quick_shippers = quick_shippers[:8]
 
     quick_commodities = ["Feldspar", "Quartz", "Mica", "Aggregate", "Sand", "Clay", "Lime"]
 
-    # --- Quick picks (1 tap) ---
+    # --- Lane presets + clone last (3-tap path) ---
+    p1, p2, p3 = st.columns(3)
+    if p1.button("Clone last", use_container_width=True, key="ll_clone_last"):
+        if not loads_df_recent.empty:
+            row = loads_df_recent.iloc[0]
+            apply_load_prefill(
+                {
+                    "shipper": str(row.get("shipper") or ""),
+                    "commodity": str(row.get("commodity") or "Feldspar"),
+                    "weight": float(row.get("weight_tons") or 24.0),
+                    "rate_per_ton": float(row.get("rate_per_ton") or PRIMARY_LANE["baseline_rate_per_ton"]),
+                    "destination": str(row.get("destination") or PRIMARY_LANE["destination"]),
+                    "origin": str(row.get("origin") or PRIMARY_LANE["origin"]),
+                    "loaded_miles": float(row.get("loaded_miles") or DEFAULT_LANE_MILES),
+                    "deadhead_miles": float(row.get("deadhead_miles") or DEFAULT_DEADHEAD_MILES),
+                    "status": "Booked",
+                    "pickup_date": date.today(),
+                    "notes": "",
+                }
+            )
+            st.rerun()
+        else:
+            st.warning("No loads to clone yet.")
+    if p2.button("Outbound SP→GA", use_container_width=True, key="ll_preset_out"):
+        apply_load_prefill(
+            {
+                "origin": PRIMARY_LANE["origin"],
+                "destination": PRIMARY_LANE["destination"],
+                "commodity": "Feldspar",
+                "weight": 24.0,
+                "rate_per_ton": float(PRIMARY_LANE["baseline_rate_per_ton"]),
+                "loaded_miles": float(DEFAULT_LANE_MILES),
+                "deadhead_miles": float(DEFAULT_DEADHEAD_MILES),
+                "status": "Booked",
+                "pickup_date": date.today(),
+            }
+        )
+        st.rerun()
+    if p3.button("Return homebound", use_container_width=True, key="ll_preset_ret"):
+        empty_hint = st.session_state.get("dh_empty_at") or TARGET_LANE_DESTINATION
+        apply_load_prefill(
+            {
+                "origin": empty_hint,
+                "destination": TARGET_LANE_ORIGIN,
+                "commodity": "Aggregate",
+                "weight": 24.0,
+                "rate_per_ton": 45.0,
+                "loaded_miles": 220.0,
+                "deadhead_miles": 40.0,
+                "status": "Potential",
+                "pickup_date": date.today(),
+                "notes": "Return homebound preset",
+            }
+        )
+        st.rerun()
+
+    # --- Quick shipper chips ---
     if quick_shippers:
         st.markdown("**Recent shippers**")
         scols = st.columns(min(4, len(quick_shippers)))
@@ -2150,75 +2570,87 @@ def render_load_logger_tab() -> None:
                     st.session_state.load_shipper_text = name
                     st.rerun()
 
-    st.markdown("**Common commodities**")
-    ccols = st.columns(len(quick_commodities))
+    st.markdown("**Commodity**")
+    ccols = st.columns(len(quick_commodities) + 1)
+    active_com = st.session_state.get("load_commodity", "Feldspar")
     for i, com in enumerate(quick_commodities):
-        if ccols[i].button(com, key=f"qc_{i}", use_container_width=True):
+        if ccols[i].button(
+            com,
+            key=f"qc_{i}",
+            use_container_width=True,
+            type="primary" if active_com == com else "secondary",
+        ):
             st.session_state.load_commodity = com
             st.rerun()
+    if ccols[-1].button(
+        "Other",
+        key="qc_other",
+        use_container_width=True,
+        type="primary" if active_com not in quick_commodities else "secondary",
+    ):
+        st.session_state.load_commodity = "Other"
+        st.rerun()
 
     st.markdown("---")
     render_section_header("Core fields", icon="⚡")
 
-    # Defaults from session/prefill
-    default_shipper = st.session_state.get(
-        "load_shipper_text", prefill.get("shipper", "")
-    )
-    default_commodity = st.session_state.get(
-        "load_commodity", prefill.get("commodity", "Feldspar")
-    )
-    if default_commodity not in APPROVED_COMMODITIES and default_commodity not in quick_commodities:
-        if default_commodity not in APPROVED_COMMODITIES:
-            # keep as select index Other
-            pass
-
+    default_commodity = st.session_state.get("load_commodity", "Feldspar")
     commodity_options = list(dict.fromkeys(quick_commodities + list(APPROVED_COMMODITIES)))
     if default_commodity not in commodity_options:
         commodity_options = [default_commodity] + commodity_options
 
-    # Row 1: shipper + destination (most typed)
+    # Seed widget defaults once (never after widget instantiation)
+    if "load_destination" not in st.session_state:
+        st.session_state.load_destination = PRIMARY_LANE["destination"]
+    if "load_commodity" not in st.session_state:
+        st.session_state.load_commodity = "Feldspar"
+    if "load_weight" not in st.session_state:
+        st.session_state.load_weight = 24.0
+    if "load_rate_per_ton" not in st.session_state:
+        st.session_state.load_rate_per_ton = float(PRIMARY_LANE["baseline_rate_per_ton"])
+    if "load_origin_opt" not in st.session_state:
+        st.session_state.load_origin_opt = PRIMARY_LANE["origin"]
+    if "load_miles_opt" not in st.session_state:
+        st.session_state.load_miles_opt = float(
+            st.session_state.get("_load_prefill_miles", DEFAULT_LANE_MILES)
+        )
+    if "load_status_simple" not in st.session_state:
+        st.session_state.load_status_simple = st.session_state.get("load_status", "Booked")
+    if "load_pickup_date" not in st.session_state:
+        st.session_state.load_pickup_date = date.today()
+
     shipper = st.text_input(
         "Shipper",
-        value=default_shipper,
         placeholder="Plant / broker name",
         key="load_shipper_text",
     )
     destination = st.text_input(
         "Destination",
-        value=st.session_state.get(
-            "load_destination", prefill.get("destination", PRIMARY_LANE["destination"])
-        ),
         placeholder="Receiver / city",
         key="load_destination",
     )
 
-    # Row 2: commodity + weight + rate (bulk core)
-    c1, c2, c3 = st.columns(3)
-    commodity = c1.selectbox(
-        "Commodity",
-        commodity_options,
-        index=commodity_options.index(default_commodity)
-        if default_commodity in commodity_options
-        else 0,
-        key="load_commodity",
-    )
+    # Commodity from chips; detail select only when not a quick pick
+    c2, c3 = st.columns(2)
+    if default_commodity not in quick_commodities:
+        commodity = st.selectbox(
+            "Commodity (detail)",
+            commodity_options,
+            key="load_commodity",
+        )
+    else:
+        commodity = default_commodity
+
     weight = c2.number_input(
         "Weight (tons)",
         min_value=0.0,
         max_value=30.0,
-        value=float(st.session_state.get("load_weight", prefill.get("weight", 24.0))),
         step=0.5,
         key="load_weight",
     )
     rate_input = c3.number_input(
         "Rate $/ton",
         min_value=0.0,
-        value=float(
-            st.session_state.get(
-                "load_rate_per_ton",
-                prefill.get("rate_per_ton", PRIMARY_LANE["baseline_rate_per_ton"]),
-            )
-        ),
         step=0.25,
         key="load_rate_per_ton",
     )
@@ -2231,49 +2663,26 @@ def render_load_logger_tab() -> None:
     )
     fit = score_trailer_fit(preview_commodity, weight, "")
     level = fit["level"]
+    lane_mi = float(st.session_state.get("load_miles_opt", DEFAULT_LANE_MILES))
 
-    # Live summary strip (no extra clicks)
     sum1, sum2, sum3, sum4 = st.columns(4)
     sum1.metric("Total $", f"${revenue_preview:,.0f}")
     sum2.metric("$/ton", f"${rate_preview:.2f}")
     sum3.metric("Fit", level)
-    sum4.metric("Lane mi", f"{DEFAULT_LANE_MILES}")
+    sum4.metric("Lane mi", f"{lane_mi:.0f}")
     st.caption(" · ".join(fit["reasons"][:2]))
 
-    # Optional extras collapsed — widgets still run so keys exist for save
-    with st.expander("More options (date, status, miles, notes)", expanded=bool(prefill.get("notes"))):
+    notes_prefill = bool(st.session_state.get("load_notes"))
+    with st.expander("More options (date, status, miles, notes)", expanded=notes_prefill):
         o1, o2 = st.columns(2)
-        pickup = o1.date_input(
-            "Date",
-            value=prefill.get("pickup_date", date.today()),
-            key="load_pickup_date",
-        )
+        pickup = o1.date_input("Date", key="load_pickup_date")
         _status_opts = ["Booked", "Potential", "Quoted", "Dispatched", "In Transit", "Delivered"]
-        _def_status = prefill.get("status", "Booked")
-        if _def_status not in _status_opts:
-            _def_status = "Booked"
-        load_status = o2.selectbox(
-            "Status",
-            _status_opts,
-            index=_status_opts.index(_def_status),
-            key="load_status_simple",
-        )
+        load_status = o2.selectbox("Status", _status_opts, key="load_status_simple")
         o3, o4 = st.columns(2)
-        origin = o3.text_input(
-            "Origin",
-            value=prefill.get("origin", PRIMARY_LANE["origin"]),
-            key="load_origin_opt",
-        )
-        miles = o4.number_input(
-            "Loaded miles",
-            min_value=0.0,
-            value=float(st.session_state.get("_load_prefill_miles", DEFAULT_LANE_MILES)),
-            step=5.0,
-            key="load_miles_opt",
-        )
+        origin = o3.text_input("Origin", key="load_origin_opt")
+        miles = o4.number_input("Loaded miles", min_value=0.0, step=5.0, key="load_miles_opt")
         notes = st.text_area(
             "Notes",
-            value=prefill.get("notes", ""),
             placeholder="Scale, tarp, washout, gate…",
             key="load_notes",
         )
@@ -2284,10 +2693,11 @@ def render_load_logger_tab() -> None:
         )
         if pricing_alt == "Total revenue":
             pricing_mode = "Total revenue"
+            if "load_total_revenue" not in st.session_state:
+                st.session_state.load_total_revenue = float(revenue_preview or 0.0)
             revenue_input = st.number_input(
                 "Total revenue ($)",
                 min_value=0.0,
-                value=float(prefill.get("total_revenue", revenue_preview or 0.0)),
                 step=1.0,
                 key="load_total_revenue",
             )
@@ -2296,8 +2706,14 @@ def render_load_logger_tab() -> None:
             )
             rate_input = rate_preview
 
-    # Sync status key used elsewhere
+    # Expander always runs widgets in Streamlit; read final values from session if needed
+    pickup = st.session_state.get("load_pickup_date", date.today())
+    load_status = st.session_state.get("load_status_simple", "Booked")
+    origin = st.session_state.get("load_origin_opt", PRIMARY_LANE["origin"])
+    miles = float(st.session_state.get("load_miles_opt", DEFAULT_LANE_MILES))
+    notes = st.session_state.get("load_notes", "") or ""
     st.session_state.load_status = load_status
+    destination = destination or PRIMARY_LANE["destination"]
 
     submitted = st.button("Save load", type="primary", use_container_width=True, key="save_load_btn")
 
@@ -2370,8 +2786,23 @@ def render_load_logger_tab() -> None:
                 ]
                 if not match.empty:
                     lead_phone = str(match.iloc[0].get("phone", ""))
+            try:
+                from lp_helpers.audit_log import log_audit
+
+                log_audit(
+                    "load_created",
+                    entity_type="load",
+                    entity_id=bol,
+                    detail=f"{shipper.strip()} · {preview_commodity} · {weight}t · ${revenue_preview:,.0f}",
+                    actor="dispatch",
+                )
+            except Exception:
+                pass
             notify_dispatcher_new_load(saved_load)
             maybe_auto_notify_load(saved_load, lead_phone)
+            # Clear sticky draft fields for next log (keep shipper optional)
+            for k in ("load_notes",):
+                st.session_state.pop(k, None)
             st.success(
                 f"Saved · {load_status} · BOL {bol} · ${revenue_preview:,.0f} · {level} fit"
             )
@@ -2381,25 +2812,20 @@ def render_load_logger_tab() -> None:
     render_section_header("Recent loads", icon="📋")
     loads_df = fetch_loads()
     lf1, lf2 = st.columns([1, 2])
+    # Single source of truth: filter_* keys bound to widgets
+    if "filter_loads_status" not in st.session_state:
+        st.session_state.filter_loads_status = "All"
+    if "filter_loads_search" not in st.session_state:
+        st.session_state.filter_loads_search = ""
     load_status_filter = lf1.selectbox(
         "Filter by status",
         ["All"] + LOAD_STATUS_OPTIONS,
-        index=(["All"] + LOAD_STATUS_OPTIONS).index(
-            st.session_state.get("filter_loads_status", "All")
-        )
-        if st.session_state.get("filter_loads_status", "All") in ["All"] + LOAD_STATUS_OPTIONS
-        else 0,
-        key="loads_status_filter_ui",
+        key="filter_loads_status",
     )
     load_search = lf2.text_input(
         "Search shipper / BOL",
-        value=st.session_state.get("filter_loads_search", ""),
-        key="loads_search_ui",
+        key="filter_loads_search",
     )
-    if load_status_filter != st.session_state.get("filter_loads_status"):
-        save_filter("filter_loads_status", load_status_filter)
-    if load_search != st.session_state.get("filter_loads_search"):
-        save_filter("filter_loads_search", load_search)
 
     if loads_df.empty:
         from lp_helpers.ui_components import render_empty_state
@@ -2435,6 +2861,91 @@ def render_load_logger_tab() -> None:
             use_container_width=True,
             hide_index=True,
         )
+
+    # Scale ticket / condition photo upload (local file paths under bol_photos/)
+    with st.expander("📷 Scale ticket / condition photos", expanded=False):
+        st.caption(
+            "Photos are stored locally under `bol_photos/` and paths are saved in the database."
+        )
+        try:
+            from lp_helpers.load_photos import (
+                PHOTO_KINDS,
+                fetch_load_photos,
+                save_load_photo,
+            )
+
+            loads_for_photo = fetch_loads()
+            if loads_for_photo.empty:
+                st.info("Log a load first, then attach scale tickets or condition photos.")
+            else:
+                photo_opts = {
+                    f"{r.get('bol_number', r.get('id'))} — {r.get('shipper', '?')}": r.to_dict()
+                    for _, r in loads_for_photo.head(40).iterrows()
+                }
+                pick_bol = st.selectbox(
+                    "Load",
+                    list(photo_opts.keys()),
+                    key="logger_photo_load",
+                )
+                load_row = photo_opts[pick_bol]
+                kind = st.selectbox(
+                    "Photo type",
+                    list(PHOTO_KINDS),
+                    format_func=lambda k: k.replace("_", " ").title(),
+                    key="logger_photo_kind",
+                )
+                notes_p = st.text_input("Notes", key="logger_photo_notes", placeholder="Gross/tare, damage…")
+                uploaded = st.file_uploader(
+                    "Upload image / PDF",
+                    type=["jpg", "jpeg", "png", "webp", "gif", "pdf"],
+                    key="logger_photo_file",
+                )
+                if uploaded and st.button(
+                    "Save photo (local path)",
+                    type="primary",
+                    use_container_width=True,
+                    key="logger_photo_save",
+                ):
+                    try:
+                        rec = save_load_photo(
+                            load_id=int(load_row["id"]) if load_row.get("id") is not None else None,
+                            bol_number=str(load_row.get("bol_number") or ""),
+                            kind=kind,
+                            file_name=uploaded.name,
+                            file_bytes=uploaded.getvalue(),
+                            notes=notes_p,
+                        )
+                        try:
+                            from lp_helpers.audit_log import log_audit
+
+                            log_audit(
+                                "photo_uploaded",
+                                entity_type="load_photo",
+                                entity_id=rec.get("id"),
+                                detail=f"{kind} → {rec.get('file_path')}",
+                                actor="dispatch",
+                            )
+                        except Exception:
+                            pass
+                        st.success(
+                            f"Saved · `{rec.get('file_path')}` · "
+                            f"absolute: `{rec.get('absolute_path')}`"
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Photo save failed: {exc}")
+
+                photos_df = fetch_load_photos()
+                if not photos_df.empty:
+                    st.dataframe(
+                        photos_df[
+                            [c for c in ["bol_number", "kind", "file_path", "original_name", "uploaded_at"] if c in photos_df.columns]
+                        ].head(20),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+        except Exception as exc:
+            st.warning(f"Photo module unavailable: {exc}")
 
     with st.expander("Lane Matcher (saved benchmarks)"):
         lane_rates_df = fetch_lane_rates()
@@ -2610,123 +3121,334 @@ def render_rate_calculator_tab(*, embedded: bool = False) -> None:
 
 
 def render_load_board_tab() -> None:
-    st.subheader("Load Board")
-    st.caption("BulkLoads NC/GA intel · log opportunities · minimize deadhead on Spruce Pine → Kohler")
-
+    """Opportunity Desk — honest sources, deadhead rank, one-tap book to Logger."""
+    from lp_helpers.bulkloads_api import (
+        fetch_live_postings,
+        is_live_configured,
+        sync_postings_to_opportunities,
+    )
+    from lp_helpers.deadhead import (
+        DEFAULT_DELIVERY_ZONE,
+        EMPTY_LOCATION_PRESETS,
+        estimate_empty_home_miles,
+        last_delivery_location,
+    )
     from lp_helpers.load_board import (
-        NC_GA_MARKET_INTEL,
+        OPPORTUNITY_SOURCE_CHOICES,
+        SOURCE_CALL_IN,
+        SOURCE_LANE_SEED_RETURN,
+        display_source,
         fetch_opportunities,
         insert_opportunity,
-        upsert_market_intel,
+        opp_card_html,
+        parse_lane,
+        rank_opportunities,
+        seed_lane_intel,
     )
 
-    render_target_lane_banner()
+    live_ok = is_live_configured()
+    feed_label = "BulkLoads live ready" if live_ok else "Local desk (no live key)"
 
-    with st.form("board_opportunity"):
-        c1, c2 = st.columns(2)
-        lane = c1.text_input(
-            "Lane",
-            value=f"{PRIMARY_LANE['origin']} → {PRIMARY_LANE['destination']}",
-        )
-        commodity = c2.selectbox("Commodity", APPROVED_COMMODITIES)
-        c3, c4 = st.columns(2)
-        rate = c3.text_input("Rate", placeholder="$48/ton")
-        contact = c4.text_input("Contact", placeholder="Broker / shipper phone")
-        notes = st.text_area("Notes", placeholder="Weight, equipment, pickup window…")
-        if st.form_submit_button("Save Opportunity", type="primary", use_container_width=True):
-            if lane.strip():
-                try:
-                    with closing(get_connection()) as conn:
-                        insert_opportunity(
-                            conn,
-                            lane=lane.strip(),
-                            commodity=commodity,
-                            rate=rate.strip(),
-                            contact=contact.strip(),
-                            notes=notes.strip(),
-                            source="manual",
-                        )
-                        conn.commit()
-                    st.success(f"Saved — {lane}")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-            else:
-                st.error("Lane is required.")
+    try:
+        loads_df = fetch_loads()
+    except Exception:
+        loads_df = pd.DataFrame()
+    detected = last_delivery_location(loads_df) or DEFAULT_DELIVERY_ZONE
+    if "board_empty_at" not in st.session_state:
+        st.session_state.board_empty_at = detected
 
-    render_section_header("NC/GA End-Dump Market Intel", icon="📈")
-    if st.button("Refresh BulkLoads Intel", use_container_width=True):
-        st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
-        added, updated, errors = 0, 0, 0
-        with closing(get_connection()) as conn:
-            for item in NC_GA_MARKET_INTEL:
-                try:
-                    if upsert_market_intel(
-                        conn,
-                        lane=item["lane"],
-                        commodity=item["commodity"],
-                        rate=item["rate"],
-                        contact=item["contact"],
-                        notes=item.get("notes", ""),
-                    ):
-                        added += 1
-                    else:
-                        updated += 1
-                except Exception as exc:
-                    errors += 1
-                    log.warning("BulkLoads upsert failed: %s", exc)
-            conn.commit()
-        msg = f"Intel sync — {added} new, {updated} updated"
-        if errors:
-            msg += f", {errors} errors (see logs)"
-        st.success(msg)
-        st.rerun()
-
-    refreshed = st.session_state.get("load_board_refreshed", "Not refreshed this session")
-    st.caption(f"Last refresh: {refreshed}")
-
-    for item in NC_GA_MARKET_INTEL:
-        st.markdown(
-            f"**{item['commodity']}** · {item['lane']} · "
-            f"**{item['rate']}** · {item['contact']}  \n"
-            f"_{item['notes']}_"
-        )
-
-    render_section_header("Saved Opportunities", icon="💼")
     try:
         with closing(get_connection()) as conn:
             opps_df = fetch_opportunities(conn)
     except Exception:
         opps_df = pd.DataFrame()
-    if opps_df.empty:
+
+    open_count = 0
+    if opps_df is not None and not opps_df.empty:
+        if "status" in opps_df.columns:
+            open_count = int(
+                opps_df["status"].astype(str).str.lower().isin(["open", "nan", "none", ""]).sum()
+                + opps_df["status"].isna().sum()
+            )
+            if open_count == 0:
+                open_count = len(opps_df)
+        else:
+            open_count = len(opps_df)
+
+    refreshed = st.session_state.get("load_board_refreshed", "—")
+    empty_at = st.session_state.get("board_empty_at") or detected
+    empty_home = estimate_empty_home_miles(empty_at, TARGET_LANE_ORIGIN)
+
+    st.markdown(
+        f"""
+        <div class="lf-desk-hero">
+          <h2>📦 Opportunity Desk</h2>
+          <p class="sub">NC → GA end-dump · honest sources · deadhead-ranked · book to Logger</p>
+          <div class="lf-desk-kpis">
+            <div class="lf-desk-kpi"><div class="lbl">Open</div><div class="val">{open_count}</div></div>
+            <div class="lf-desk-kpi"><div class="lbl">Feed</div><div class="val">{feed_label}</div></div>
+            <div class="lf-desk-kpi"><div class="lbl">Empty near</div><div class="val">{(str(empty_at)[:22] + "…") if len(str(empty_at)) > 22 else empty_at}</div></div>
+            <div class="lf-desk-kpi"><div class="lbl">Empty home</div><div class="val">{empty_home:.0f} mi</div></div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    render_target_lane_banner()
+    st.caption(f"Last seed/refresh: **{refreshed}** · Pure empty fuel ~**${empty_home * FUEL_COST_PER_MILE:,.0f}**")
+
+    # --- Empty-location chips (sort context) ---
+    st.markdown("**Rank returns as if empty near…**")
+    chip_cols = st.columns(len(EMPTY_LOCATION_PRESETS))
+    for i, (label, value) in enumerate(EMPTY_LOCATION_PRESETS):
+        resolved = detected if label == "Last delivery" or not value else value
+        with chip_cols[i]:
+            is_active = st.session_state.get("board_empty_at") == resolved or (
+                label == "Last delivery" and st.session_state.get("board_empty_at") == detected
+            )
+            if st.button(
+                label,
+                key=f"board_chip_{i}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                st.session_state.board_empty_at = resolved
+                st.rerun()
+    st.text_input("Empty location", key="board_empty_at", help="Used only for deadhead ranking on this desk.")
+    empty_at = st.session_state.get("board_empty_at") or detected
+
+    # --- Ranked desk ---
+    render_section_header("Ranked for deadhead", icon="🎯")
+    if opps_df is None or opps_df.empty:
         from lp_helpers.ui_components import render_empty_state
 
         render_empty_state(
             "📦",
-            "No opportunities yet",
-            "Refresh intel or log an opportunity above to get started.",
+            "Desk is empty",
+            "Seed lane intel or log a call-in below — then rank returns and book to Logger.",
         )
+        seed_col, _ = st.columns(2)
+        if seed_col.button("Seed NC/GA lane intel", type="primary", use_container_width=True, key="desk_seed_empty"):
+            try:
+                with closing(get_connection()) as conn:
+                    added, updated = seed_lane_intel(conn)
+                    conn.commit()
+                st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
+                clear_data_caches()
+                st.success(f"Seeded · {added} new · {updated} refreshed")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
     else:
-        show = [c for c in ["lane", "commodity", "rate", "contact", "source", "created_at"] if c in opps_df.columns]
-        st.dataframe(opps_df[show], use_container_width=True, hide_index=True)
+        cards = rank_opportunities(
+            opps_df,
+            home=TARGET_LANE_ORIGIN,
+            current_location=empty_at,
+            fuel_cost_per_mile=FUEL_COST_PER_MILE,
+        )
+        st.caption(f"{len(cards)} opportunities · sorted by return score (home = {TARGET_LANE_ORIGIN})")
+        for i, card in enumerate(cards[:24]):
+            st.markdown(opp_card_html(card), unsafe_allow_html=True)
+            b1, b2 = st.columns([1, 1])
+            if b1.button(
+                "📋 Book to Logger",
+                key=f"desk_book_{i}_{card.get('id')}",
+                use_container_width=True,
+                type="primary",
+            ):
+                rate_num = None
+                try:
+                    from lp_helpers.deadhead import _parse_rate
 
-        st.markdown("#### Book to Logger")
-        labels = [
-            f"{r.get('commodity', '?')} — {r.get('lane', '?')}"
-            for _, r in opps_df.iterrows()
-        ]
-        pick = st.selectbox("Opportunity", labels)
-        if st.button("Pre-fill Logger", use_container_width=True):
-            row = opps_df.iloc[labels.index(pick)].to_dict()
-            parts = str(row.get("lane", "")).split("→")
-            dest = parts[-1].strip() if len(parts) > 1 else PRIMARY_LANE["destination"]
-            prefill_load_logger(
-                shipper=row.get("contact", ""),
-                commodity=row.get("commodity", "Feldspar"),
-                destination=dest,
-                notes=row.get("notes", ""),
-                status="Potential",
+                    rate_num, _ = _parse_rate(card.get("rate"))
+                except Exception:
+                    rate_num = None
+                ben = card.get("benefit") or {}
+                prefill_load_logger(
+                    shipper=str(card.get("contact") or ""),
+                    commodity=str(card.get("commodity") or "Aggregate"),
+                    origin=str(card.get("origin") or empty_at),
+                    destination=str(card.get("destination") or ""),
+                    rate_per_ton=rate_num,
+                    weight=24.0,
+                    status="Potential",
+                    notes=(
+                        f"Desk · {card.get('source')} · {card.get('grade')} {card.get('score')} · "
+                        f"{card.get('lane')} · "
+                        f"{card.get('notes') or ''}"
+                    ).strip(),
+                    deadhead_miles=float(ben.get("empty_to_pickup_mi") or 40),
+                    loaded_miles=float(ben.get("loaded_return_mi") or 220),
+                )
+            if b2.button(
+                "Save call note only",
+                key=f"desk_note_{i}_{card.get('id')}",
+                use_container_width=True,
+            ):
+                st.session_state["desk_form_lane"] = card.get("lane", "")
+                st.session_state["desk_form_commodity"] = card.get("commodity", "Aggregate")
+                st.info("Scroll to Log opportunity — lane prefilled from this card.")
+                st.rerun()
+
+    # --- Log opportunity + seed ---
+    render_section_header("Log opportunity", icon="📥")
+    default_lane = st.session_state.pop(
+        "desk_form_lane",
+        f"{PRIMARY_LANE['origin']} → {PRIMARY_LANE['destination']}",
+    )
+    default_commodity = st.session_state.pop("desk_form_commodity", None)
+    commodity_list = list(APPROVED_COMMODITIES)
+    commodity_index = 0
+    if default_commodity and default_commodity in commodity_list:
+        commodity_index = commodity_list.index(default_commodity)
+
+    with st.form("board_opportunity"):
+        c1, c2 = st.columns(2)
+        lane = c1.text_input("Lane *", value=default_lane)
+        commodity = c2.selectbox("Commodity", commodity_list, index=commodity_index)
+        c3, c4, c5 = st.columns(3)
+        rate = c3.text_input("Rate", placeholder="$48/ton or $1,200 flat")
+        contact = c4.text_input("Contact", placeholder="Broker / shipper phone")
+        source = c5.selectbox("Source (honest label)", OPPORTUNITY_SOURCE_CHOICES, index=0)
+        notes = st.text_area("Notes", placeholder="Weight, equipment, pickup window, who called…")
+        save_only = st.form_submit_button("Save to desk", use_container_width=True)
+        save_book = st.form_submit_button("Save + Book to Logger", type="primary", use_container_width=True)
+
+    if save_only or save_book:
+        if not lane.strip():
+            st.error("Lane is required.")
+        else:
+            try:
+                with closing(get_connection()) as conn:
+                    insert_opportunity(
+                        conn,
+                        lane=lane.strip(),
+                        commodity=commodity,
+                        rate=rate.strip(),
+                        contact=contact.strip(),
+                        notes=notes.strip(),
+                        source=source or SOURCE_CALL_IN,
+                    )
+                    conn.commit()
+                try:
+                    from lp_helpers.audit_log import log_audit
+
+                    log_audit(
+                        "opportunity_saved",
+                        entity_type="opportunity",
+                        detail=f"{source}|{lane.strip()}",
+                        actor="dispatch",
+                    )
+                except Exception:
+                    pass
+                clear_data_caches()
+                if save_book:
+                    origin, dest = parse_lane(lane.strip())
+                    rate_num = None
+                    try:
+                        from lp_helpers.deadhead import _parse_rate
+
+                        rate_num, _ = _parse_rate(rate)
+                    except Exception:
+                        pass
+                    prefill_load_logger(
+                        shipper=contact.strip(),
+                        commodity=commodity,
+                        origin=origin or empty_at,
+                        destination=dest or PRIMARY_LANE["destination"],
+                        rate_per_ton=rate_num,
+                        weight=24.0,
+                        status="Potential",
+                        notes=f"{source} · {notes.strip()}".strip(" ·"),
+                    )
+                else:
+                    st.success(f"Saved — {display_source(source)} · {lane}")
+                    st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+    # --- Quick actions: seed + optional live feed ---
+    render_section_header("Desk tools", icon="🛠")
+    t1, t2 = st.columns(2)
+    if t1.button("🌱 Seed / refresh NC·GA lane intel", use_container_width=True, type="primary"):
+        try:
+            with closing(get_connection()) as conn:
+                added, updated = seed_lane_intel(conn)
+                conn.commit()
+            st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
+            clear_data_caches()
+            st.success(
+                f"Lane seeds (not live board) · {added} new · {updated} updated. "
+                "Sources labeled Lane Seed · Return / Outbound."
             )
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+
+    with t2:
+        if live_ok:
+            if st.button("📡 Pull BulkLoads live", use_container_width=True):
+                with st.spinner("Fetching BulkLoads…"):
+                    result = fetch_live_postings()
+                st.session_state["bulkloads_result"] = result
+                st.session_state.load_board_refreshed = datetime.now().strftime("%Y-%m-%d %H:%M")
+                listings = result.get("listings") or []
+                # Tag live listings honestly before sync
+                for item in listings:
+                    if result.get("live"):
+                        item["source"] = "BulkLoads · Live"
+                    else:
+                        item["source"] = item.get("source") or SOURCE_LANE_SEED_RETURN
+                try:
+                    with closing(get_connection()) as conn:
+                        added, updated = sync_postings_to_opportunities(conn, listings)
+                        conn.commit()
+                    clear_data_caches()
+                except Exception as exc:
+                    st.warning(f"Sync failed: {exc}")
+                    added = updated = 0
+                msg = result.get("message", "")
+                if result.get("live"):
+                    st.success(f"{msg} · synced {added}/{updated}")
+                else:
+                    st.warning(f"{msg} · synced {added}/{updated}")
+                st.rerun()
+        else:
+            st.info(
+                "No BulkLoads key — desk runs on call-ins + lane seeds. "
+                "Optional: add `[bulkloads] api_key` in `.streamlit/secrets.toml`."
+            )
+
+    with st.expander("Table view (all opportunities)", expanded=False):
+        if opps_df is None or opps_df.empty:
+            st.caption("Nothing saved yet.")
+        else:
+            show_df = opps_df.copy()
+            if "source" in show_df.columns:
+                show_df["source"] = show_df["source"].map(lambda s: display_source(s))
+            show = [
+                c
+                for c in ["lane", "commodity", "rate", "contact", "source", "status", "created_at"]
+                if c in show_df.columns
+            ]
+            st.dataframe(show_df[show], use_container_width=True, hide_index=True)
+
+
+def render_fleet_tab() -> None:
+    """Multi-trailer / multi-driver assignment board."""
+    try:
+        from lp_helpers.audit_log import log_audit
+        from lp_helpers.fleet_view import render_fleet_page
+
+        render_fleet_page(
+            fetch_loads=fetch_loads,
+            render_page_header=lambda t, s: (st.subheader(t), st.caption(s)),
+            clear_cache=clear_data_caches,
+            log_audit=log_audit,
+        )
+    except Exception as exc:
+        log.exception("Fleet tab failed")
+        st.error(f"Fleet view unavailable: {exc}")
 
 
 def render_gps_tracking_tab() -> None:
@@ -3104,6 +3826,96 @@ def render_alerts_tab() -> None:
                     st.error(str(exc))
 
     st.divider()
+    render_section_header("Rate quotes & follow-ups", icon="💬")
+    try:
+        from lp_helpers.followup_templates import RATE_QUOTE_KEYS, render_followup_panel
+
+        loads_for_quote = fetch_loads()
+        try:
+            _driver_label = str(get_active_owner() or "Phillip / Lawson")
+        except Exception:
+            _driver_label = "Phillip / Lawson"
+        quote_ctx: dict[str, Any] = {
+            "contact_name": lead.get("contact_name") or lead.get("company") or "there",
+            "company": lead.get("company") or "Shipper",
+            "phone": str(lead.get("phone") or get_secret("twilio", "dispatch_phone", "+18284678218")),
+            "email": str(lead.get("email") or ""),
+            "commodity": "Feldspar",
+            "weight_tons": 24.0,
+            "origin": PRIMARY_LANE["origin"],
+            "destination": PRIMARY_LANE["destination"],
+            "rate_per_ton": float(PRIMARY_LANE.get("baseline_rate_per_ton") or 48),
+            "total_revenue": float(PRIMARY_LANE.get("baseline_rate_per_ton") or 48) * 24,
+            "bol_number": "LP-QUOTE",
+            "pickup_date": str(date.today()),
+            "valid_through": "end of week",
+            "driver": _driver_label,
+        }
+        if not loads_for_quote.empty:
+            latest = loads_for_quote.iloc[0].to_dict()
+            quote_ctx.update(
+                {
+                    "commodity": latest.get("commodity") or quote_ctx["commodity"],
+                    "weight_tons": float(latest.get("weight_tons") or 24),
+                    "origin": latest.get("origin") or quote_ctx["origin"],
+                    "destination": latest.get("destination") or quote_ctx["destination"],
+                    "rate_per_ton": float(latest.get("rate_per_ton") or quote_ctx["rate_per_ton"]),
+                    "total_revenue": float(latest.get("total_revenue") or quote_ctx["total_revenue"]),
+                    "bol_number": latest.get("bol_number") or quote_ctx["bol_number"],
+                    "shipper": latest.get("shipper") or quote_ctx["company"],
+                    "company": latest.get("shipper") or quote_ctx["company"],
+                }
+            )
+
+        def _log_followup(template_key: str, message: str, channel: str) -> None:
+            log_sms_event(
+                lead.get("id") if isinstance(lead.get("id"), int) else None,
+                template_key,
+                message,
+                channel,
+            )
+            try:
+                from lp_helpers.audit_log import log_audit
+
+                log_audit(
+                    "followup_sent",
+                    entity_type="template",
+                    entity_id=template_key,
+                    detail=channel,
+                    actor="dispatch",
+                )
+            except Exception:
+                pass
+
+        def _send_sms(to_number: str, body: str) -> str | None:
+            return send_twilio_notification(to_number, body)
+
+        def _send_email(to_email: str, subject: str, body: str) -> None:
+            send_email_notification(to_email, subject, body)
+
+        render_followup_panel(
+            "Rate quotes & sales follow-ups",
+            quote_ctx,
+            template_keys=RATE_QUOTE_KEYS
+            + [
+                "feldspar_discussion",
+                "pickup_reminder",
+                "load_logged_thanks",
+                "callback_request",
+                "bulkloads_opportunity",
+                "scale_ticket_request",
+            ],
+            log_callback=_log_followup,
+            panel_key="alerts_quotes",
+            send_sms=_send_sms if tw_ok else None,
+            send_email=_send_email if smtp_ok else None,
+            default_phone=str(lead.get("phone") or ""),
+            default_email=str(lead.get("email") or ""),
+        )
+    except Exception as exc:
+        st.warning(f"Follow-up templates unavailable: {exc}")
+
+    st.divider()
     render_section_header("Alert Log", icon="📋")
     try:
         with closing(get_connection()) as conn:
@@ -3176,6 +3988,18 @@ def render_bol_generator_tab() -> None:
                 out_path.write_bytes(pdf_bytes)
                 bol_msg = format_sms("bol_ready", load)
                 log_sms_event(None, "bol_ready", bol_msg, "generated")
+                try:
+                    from lp_helpers.audit_log import log_audit
+
+                    log_audit(
+                        "bol_generated",
+                        entity_type="bol",
+                        entity_id=str(load.get("bol_number") or ""),
+                        detail=pdf_name,
+                        actor="dispatch",
+                    )
+                except Exception:
+                    pass
                 st.success(f"BOL generated — saved to attachments/{pdf_name}")
                 if st.session_state.get("sms_auto_send") == "1":
                     st.info("BOL ready notification logged. Enable Twilio to auto-send.")
@@ -3197,6 +4021,191 @@ def render_bol_generator_tab() -> None:
             mime="application/pdf",
             use_container_width=True,
         )
+
+    st.divider()
+    render_section_header("Scale ticket / condition photos", icon="📷")
+    try:
+        from lp_helpers.load_photos import (
+            PHOTO_KINDS,
+            fetch_load_photos,
+            resolve_photo_path,
+            save_load_photo,
+        )
+
+        kind = st.selectbox(
+            "Photo type",
+            list(PHOTO_KINDS),
+            format_func=lambda k: k.replace("_", " ").title(),
+            key="bol_photo_kind",
+        )
+        notes_p = st.text_input("Photo notes", key="bol_photo_notes")
+        uploaded = st.file_uploader(
+            "Upload scale ticket or condition photo",
+            type=["jpg", "jpeg", "png", "webp", "gif", "pdf"],
+            key="bol_photo_file",
+        )
+        if uploaded and st.button(
+            "Save photo to bol_photos/",
+            use_container_width=True,
+            key="bol_photo_save",
+        ):
+            rec = save_load_photo(
+                load_id=int(load["id"]) if load.get("id") is not None else None,
+                bol_number=str(load.get("bol_number") or ""),
+                kind=kind,
+                file_name=uploaded.name,
+                file_bytes=uploaded.getvalue(),
+                notes=notes_p,
+            )
+            try:
+                from lp_helpers.audit_log import log_audit
+
+                log_audit(
+                    "photo_uploaded",
+                    entity_type="load_photo",
+                    entity_id=rec.get("id"),
+                    detail=f"{kind} · {rec.get('file_path')}",
+                    actor="dispatch",
+                )
+            except Exception:
+                pass
+            st.success(f"Saved local path: `{rec.get('file_path')}`")
+            st.rerun()
+
+        photos = fetch_load_photos(
+            load_id=int(load["id"]) if load.get("id") is not None else None,
+            bol_number=str(load.get("bol_number") or "") or None,
+        )
+        if not photos.empty:
+            st.dataframe(
+                photos[
+                    [c for c in ["kind", "file_path", "original_name", "notes", "uploaded_at"] if c in photos.columns]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            for _, prow in photos.head(6).iterrows():
+                path = resolve_photo_path(str(prow.get("file_path") or ""))
+                if path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif") and path.is_file():
+                    st.image(str(path), caption=f"{prow.get('kind')} · {path.name}", width=280)
+        else:
+            st.caption("No photos for this load yet.")
+    except Exception as exc:
+        st.warning(f"Photo panel unavailable: {exc}")
+
+    st.divider()
+    render_section_header("Export all contracts + audit log", icon="📦")
+    st.caption(
+        "Download a ZIP of every BOL PDF, a multi-page contracts summary, and the full audit log PDF. "
+        "Files are also written under `attachments/`."
+    )
+    try:
+        from lp_helpers.audit_log import (
+            fetch_audit_log,
+            generate_all_contracts_zip,
+            generate_audit_log_pdf,
+            generate_contracts_bundle_pdf,
+            log_audit,
+            write_export_to_attachments,
+        )
+
+        exp1, exp2, exp3 = st.columns(3)
+        if exp1.button("Export contracts PDF", use_container_width=True, key="export_contracts_pdf"):
+            try:
+                pdf_bytes = generate_contracts_bundle_pdf(loads_df, app_version=APP_VERSION)
+                name = f"LP_all_contracts_{date.today().isoformat()}.pdf"
+                write_export_to_attachments(pdf_bytes, name)
+                log_audit(
+                    "export_contracts_pdf",
+                    entity_type="export",
+                    detail=name,
+                    actor="dispatch",
+                )
+                st.session_state["export_contracts_pdf"] = pdf_bytes
+                st.session_state["export_contracts_name"] = name
+                st.success(f"Saved attachments/{name}")
+            except Exception as exc:
+                st.error(f"Contracts PDF failed: {exc}")
+
+        if exp2.button("Export audit log PDF", use_container_width=True, key="export_audit_pdf"):
+            try:
+                audit_bytes = generate_audit_log_pdf()
+                name = f"LP_audit_log_{date.today().isoformat()}.pdf"
+                write_export_to_attachments(audit_bytes, name)
+                log_audit(
+                    "export_audit_pdf",
+                    entity_type="export",
+                    detail=name,
+                    actor="dispatch",
+                )
+                st.session_state["export_audit_pdf"] = audit_bytes
+                st.session_state["export_audit_name"] = name
+                st.success(f"Saved attachments/{name}")
+            except Exception as exc:
+                st.error(f"Audit PDF failed: {exc}")
+
+        if exp3.button(
+            "ZIP: all contracts + audit",
+            use_container_width=True,
+            type="primary",
+            key="export_contracts_zip",
+        ):
+            try:
+                zip_bytes = generate_all_contracts_zip(
+                    loads_df,
+                    generate_bol_pdf,
+                    include_audit=True,
+                )
+                name = f"LP_contracts_audit_{date.today().isoformat()}.zip"
+                write_export_to_attachments(zip_bytes, name)
+                log_audit(
+                    "export_contracts_zip",
+                    entity_type="export",
+                    detail=name,
+                    actor="dispatch",
+                )
+                st.session_state["export_contracts_zip"] = zip_bytes
+                st.session_state["export_zip_name"] = name
+                st.success(f"Saved attachments/{name}")
+            except Exception as exc:
+                st.error(f"ZIP export failed: {exc}")
+
+        if st.session_state.get("export_contracts_pdf"):
+            st.download_button(
+                "Download contracts PDF",
+                st.session_state["export_contracts_pdf"],
+                st.session_state.get("export_contracts_name", "contracts.pdf"),
+                mime="application/pdf",
+                use_container_width=True,
+                key="dl_contracts_pdf",
+            )
+        if st.session_state.get("export_audit_pdf"):
+            st.download_button(
+                "Download audit log PDF",
+                st.session_state["export_audit_pdf"],
+                st.session_state.get("export_audit_name", "audit.pdf"),
+                mime="application/pdf",
+                use_container_width=True,
+                key="dl_audit_pdf",
+            )
+        if st.session_state.get("export_contracts_zip"):
+            st.download_button(
+                "Download contracts + audit ZIP",
+                st.session_state["export_contracts_zip"],
+                st.session_state.get("export_zip_name", "contracts_audit.zip"),
+                mime="application/zip",
+                use_container_width=True,
+                key="dl_contracts_zip",
+            )
+
+        audit_df = fetch_audit_log(limit=50)
+        with st.expander("Recent audit events", expanded=False):
+            if audit_df.empty:
+                st.caption("No audit events yet — actions will appear here as you use the app.")
+            else:
+                st.dataframe(audit_df, use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"Export / audit module unavailable: {exc}")
 
 
 def _driver_view_requested() -> bool:
@@ -3281,16 +4290,51 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
         st.markdown(
             """
             <style>
-            .stApp { background-color: #0b1120 !important; color: #f1f5f9 !important; }
-            section[data-testid="stSidebar"] { background-color: #1e2937 !important; }
-            .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {
-                background-color: #1e2937 !important; color: #e0e7ff !important;
-                border: 2px solid #475569 !important; -webkit-text-fill-color: #e0e7ff !important;
+            .stApp {
+                background:
+                    radial-gradient(ellipse 120% 80% at 10% -10%, rgba(34, 211, 238, 0.14) 0%, transparent 50%),
+                    radial-gradient(ellipse 90% 60% at 100% 0%, rgba(255, 107, 0, 0.10) 0%, transparent 45%),
+                    linear-gradient(165deg, #050a12 0%, #0a1220 45%, #0b1528 100%) !important;
+                color: #F8FAFC !important;
             }
-            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
-                color: #ffffff !important; font-weight: 700 !important; min-height: 48px !important; }
-            button[kind="secondary"] { background-color: #1e2937 !important; color: #f1f5f9 !important; border: 2px solid #475569 !important; }
-            div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #bae6fd !important; font-size: 1.6rem !important; font-weight: 800 !important; }
+            section[data-testid="stSidebar"] {
+                background: #03060d !important;
+                border-right: 1px solid rgba(34, 211, 238, 0.35) !important;
+            }
+            .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {
+                background-color: #0c1524 !important; color: #e0e7ff !important;
+                border: 1px solid #1e3a5f !important; -webkit-text-fill-color: #e0e7ff !important;
+                border-radius: 10px !important;
+            }
+            .stButton > button, .stFormSubmitButton > button, .stDownloadButton > button {
+                width: 100% !important;
+                min-height: 3.5rem !important;
+                height: 3.5rem !important;
+                font-size: 1.2rem !important;
+                font-weight: 700 !important;
+                background: linear-gradient(90deg, #FF6B00, #FF9500) !important;
+                color: #ffffff !important;
+                border: none !important;
+                border-radius: 12px !important;
+                box-shadow: 0 0 14px rgba(255, 107, 0, 0.5), 0 4px 18px rgba(255, 107, 0, 0.35) !important;
+            }
+            .stButton > button:hover, .stFormSubmitButton > button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 0 24px rgba(255, 107, 0, 0.75), 0 6px 24px rgba(255, 107, 0, 0.5) !important;
+            }
+            button[kind="secondary"], .stButton > button[kind="secondary"] {
+                background-color: #0c1524 !important; color: #F8FAFC !important;
+                border: 1px solid rgba(34, 211, 238, 0.4) !important;
+                box-shadow: 0 0 8px rgba(34, 211, 238, 0.15) !important;
+            }
+            button[kind="secondary"]:hover, .stButton > button[kind="secondary"]:hover {
+                border-color: #22D3EE !important;
+                box-shadow: 0 0 16px rgba(34, 211, 238, 0.4) !important;
+            }
+            div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+                color: #22D3EE !important; font-size: 1.6rem !important; font-weight: 800 !important;
+                text-shadow: 0 0 18px rgba(34, 211, 238, 0.45) !important;
+            }
             </style>
             """,
             unsafe_allow_html=True,
@@ -3305,9 +4349,29 @@ def apply_platform_theme(night_mode: bool | None = None) -> None:
                 background-color: #ffffff !important; color: #0f172a !important;
                 border: 2px solid #cbd5e1 !important; -webkit-text-fill-color: #0f172a !important;
             }
-            .stButton > button { background: linear-gradient(135deg, #1e40af, #3b82f6) !important;
-                color: #ffffff !important; font-weight: 700 !important; min-height: 48px !important; }
-            button[kind="secondary"] { background-color: #f1f5f9 !important; color: #0f172a !important; border: 2px solid #cbd5e1 !important; }
+            .stButton > button, .stFormSubmitButton > button, .stDownloadButton > button {
+                width: 100% !important;
+                min-height: 3.5rem !important;
+                height: 3.5rem !important;
+                font-size: 1.2rem !important;
+                font-weight: 700 !important;
+                background: linear-gradient(90deg, #FF6B00, #FF9500) !important;
+                color: #ffffff !important;
+                border: none !important;
+                border-radius: 12px !important;
+                box-shadow: 0 4px 15px rgba(255, 107, 0, 0.35) !important;
+            }
+            .stButton > button:hover, .stFormSubmitButton > button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(255, 107, 0, 0.5) !important;
+            }
+            button[kind="secondary"], .stButton > button[kind="secondary"] {
+                background-color: #f1f5f9 !important; color: #0f172a !important;
+                border: 2px solid #cbd5e1 !important;
+            }
+            button[kind="secondary"]:hover, .stButton > button[kind="secondary"]:hover {
+                border-color: #FF6B00 !important;
+            }
             div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #1e40af !important; font-size: 1.6rem !important; font-weight: 800 !important; }
             </style>
             """,
@@ -3363,6 +4427,14 @@ def main() -> None:
         page_icon="🚛",
         layout="wide",
     )
+
+    try:
+        from streamlit_extras.metric_cards import style_metric_cards  # noqa: F401
+
+        HAS_EXTRAS = True
+    except ImportError:
+        HAS_EXTRAS = False
+    st.session_state["_has_streamlit_extras"] = HAS_EXTRAS
 
     # === Initialize Session State Persistence ===
     try:
@@ -3457,6 +4529,8 @@ def main() -> None:
         render_load_logger_tab()
     elif active == "Board":
         render_load_board_tab()
+    elif active == "Fleet":
+        render_fleet_tab()
     elif active == "GPS":
         render_gps_tracking_tab()
     elif active == "BOL":
