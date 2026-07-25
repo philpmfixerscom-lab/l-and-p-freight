@@ -451,7 +451,10 @@ def render_driver_app(
 
     # Bin Estimate — shown after load is delivered
     if str(status).lower() in ("delivered", "complete", "completed"):
-        _render_bin_estimate(get_connection, load, owner)
+        if st.button("🗑️ Log Bin Estimate", use_container_width=True, key="driver_bin_est_btn"):
+            st.session_state.driver_show_bin_est = True
+        if st.session_state.get("driver_show_bin_est"):
+            _render_bin_estimate(get_connection, load, owner)
 
     # Live tracking (secondary) — Traccar status only; navigation is the card above
     st.markdown("""#### Live tracking""")
@@ -507,9 +510,9 @@ def _render_bin_estimate(
         )
         if saved.get("days_of_supply") is not None:
             dos = saved["days_of_supply"]
-            color = "green" if dos > 14 else ("orange" if dos >= 7 else "red")
+            color_hex = days_of_supply_color(dos)
             st.markdown(
-                f"Days of supply: **:{color}[{dos:.1f}]** days",
+                f"Days of supply: <span style='color:{color_hex}; font-weight:600'>{dos:.1f} days</span>",
                 unsafe_allow_html=True,
             )
         else:
@@ -562,6 +565,7 @@ def _render_bin_estimate(
                 recalculate_days_of_supply,
                 save_inventory_photos,
             )
+            from lp_helpers.ui_components import days_of_supply_color, render_days_of_supply
 
             lead_id = load.get("lead_id")
             if lead_id is None:

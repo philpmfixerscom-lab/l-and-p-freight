@@ -158,14 +158,23 @@ def save_inventory_photos(
 
 
 def days_of_supply_color(days: float | None) -> str:
-    """Return 'green', 'amber', or 'red' for days-of-supply legend."""
+    """Return a hex color based on days of supply remaining."""
     if days is None:
-        return "amber"
-    if days > 14:
-        return "green"
+        return "#94a3b8"      # gray
+    if days >= 14:
+        return "#4ade80"      # green
     if days >= 7:
-        return "amber"
-    return "red"
+        return "#fbbf24"      # yellow
+    return "#f87171"          # red
+
+
+def render_days_of_supply(days: float | None) -> str:
+    """Return an HTML span with color-coded days-of-supply text."""
+    if days is None:
+        return "—"
+    color = days_of_supply_color(days)
+    label = f"{days:.0f} days"
+    return f"<span style='color:{color}; font-weight:600'>{label}</span>"
 
 
 def level_to_tons(level: str, bin_capacity_tons: float = 24.0) -> float:

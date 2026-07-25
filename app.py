@@ -3059,6 +3059,73 @@ def render_load_logger_tab() -> None:
         except Exception as exc:
             st.warning(f"Photo module unavailable: {exc}")
 
+    st.divider()
+    render_section_header("Log Bin Estimate", icon="🗑️")
+    st.caption("Estimate bin level for completed / delivered loads")
+    completed_loads = loads_df[loads_df["status"].isin(["Delivered", "Completed", "Paid"])]
+    if not completed_loads.empty:
+        load_options = {
+            f"{r['bol_number']} — {r['shipper']} ({r.get('pickup_date','')})": r.to_dict()
+            for _, r in completed_loads.iterrows()
+        }
+        pick_label = st.selectbox("Completed load", list(load_options.keys()), key="logger_bin_pick")
+        pick_load = load_options[pick_label]
+        if st.button("🗑️ Log Bin Estimate", use_container_width=True, type="primary", key="logger_bin_est_start"):
+            st.session_state.logger_bin_est = {"load": pick_load}
+            st.rerun()
+        if st.session_state.get("logger_bin_est", {}).get("load", {}).get("id") == pick_load.get("id"):
+            form_load = st.session_state.logger_bin_est["load"]
+            st.caption(f"Load: **{form_load.get('shipper', '—')}** · {form_load.get('commodity', '—')}")
+            levels = ["Empty", "1/4", "1/2", "3/4", "Full"]
+            sel_level = st.radio("Estimated Level", levels, key="logger_bin_level")
+            tons = st.number_input("Estimated tons (optional)", min_value=0.0, max_value=30.0, step=0.5, key="logger_bin_tons")
+            photos = st.file_uploader("Photos (optional, up to 3)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="logger_bin_photos")
+            notes = st.text_area("Notes (optional)", key="logger_bin_notes")
+            if st.button("Submit Bin Estimate", use_container_width=True, type="primary", key="logger_bin_submit"):
+                try:
+                    from lp_helpers.inventory import (
+                        LEVEL_TONS_MAP,
+                        ensure_inventory_photos_dir,
+                        insert_inventory_estimate,
+                        recalculate_days_of_supply,
+                        save_inventory_photos,
+                    )
+                    from lp_helpers.ui_components import days_of_supply_color, render_days_of_supply
+                    lead_id = form_load.get("lead_id")
+                    if lead_id is None:
+                        shipper = str(form_load.get("shipper", "")).strip()
+                        with closing(get_connection()) as conn:
+                            row = conn.execute("SELECT id FROM leads WHERE company = ? LIMIT 1", (shipper,)).fetchone()
+                            lead_id = int(row["id"]) if row else None
+                    photo_files = photos[:3] if photos else []
+                    photo_paths = save_inventory_photos(lead_id, form_load.get("id"), photo_files)
+                    est_tons = tons if tons and tons > 0 else float(LEVEL_TONS_MAP.get(sel_level, 0.0) * 24)
+                    with closing(get_connection()) as conn:
+                        insert_inventory_estimate(
+                            conn,
+                            lead_id=lead_id,
+                            load_id=form_load.get("id"),
+                            commodity=str(form_load.get("commodity", "")),
+                            estimated_level=sel_level,
+                            estimated_tons=est_tons,
+                            photo_paths=photo_paths,
+                            driver_notes=notes,
+                            estimated_by=str(get_active_owner() or "dispatch"),
+                        )
+                        days = None
+                        if lead_id is not None:
+                            days = recalculate_days_of_supply(conn, lead_id)
+                        conn.commit()
+                    st.success(f"Saved · {sel_level} · Est. {est_tons:.1f}t")
+                    if days is not None:
+                        st.markdown(f"Days of supply: {render_days_of_supply(days)}", unsafe_allow_html=True)
+                    st.session_state.pop("logger_bin_est", None)
+                    clear_data_caches()
+                except Exception as exc:
+                    st.error(f"Save failed: {exc}")
+    else:
+        st.caption("No completed / delivered loads yet.")
+
     with st.expander("Lane Matcher (saved benchmarks)"):
         lane_rates_df = fetch_lane_rates()
         m1, m2, m3 = st.columns(3)
@@ -4658,8 +4725,12 @@ def main() -> None:
 
 
 def render_inventory_tab() -> None:
-    from lp_helpers.database import fetch_inventory_estimates, fetch_leads
-    from lp_helpers.ui_components import days_of_supply_color, render_section_header
+    from lp_helpers.ui_components import (
+        days_of_supply_color,
+        render_days_of_supply,
+        render_empty_state,
+        render_section_header,
+    )
 
     render_section_header("Bin Estimates", icon="🗑️")
     st.caption("Driver bin-level estimates · days of supply = est_tons / avg_weekly_tons × 7")
@@ -4700,18 +4771,18 @@ def render_inventory_tab() -> None:
         st.caption("No leads yet.")
     else:
         for _, lead in leads_df.iterrows():
-            dos_val = lead.get("days_of_s_supply_est")
+            dos_val = lead.get("days_of_supply_est")
             try:
                 dos_val_f = float(dos_val) if dos_val is not None else None
             except (TypeError, ValueError):
                 dos_val_f = None
 
             level = str(lead.get("last_estimate_level") or "")
-            dos_color = days_of_supply_color(dos_val_f)
             st.markdown(
                 f"**{lead.get('company', '—')}** · "
                 f"Last level: {level or '—'} · "
-                f"Days of supply: **:{dos_color}[{f'{dos_val_f:.1f}' if dos_val_f is not None else '—'}]**"
+                f"Days of supply: {render_days_of_supply(dos_val_f)}",
+                unsafe_allow_html=True,
             )
 
 

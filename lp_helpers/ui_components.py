@@ -651,3 +651,29 @@ def render_section_header(title: str, icon: str = "") -> None:
     """Consistent section header with optional icon."""
     display = f"{icon} {title}" if icon else title
     st.markdown(f'<div class="lf-section-header">{display}</div>', unsafe_allow_html=True)
+
+
+def days_of_supply_color(days: float | None) -> str:
+    """Return a hex color based on days of supply remaining."""
+    if days is None:
+        return "#94a3b8"          # gray – no data
+    if days >= 14:
+        return "#4ade80"          # green
+    if days >= 7:
+        return "#fbbf24"          # yellow
+    return "#f87171"              # red
+
+
+def render_days_of_supply(days: float | None) -> str:
+    """Return an HTML span with color-coded days-of-supply text."""
+    if days is None:
+        return "—"
+    color = days_of_supply_color(days)
+    label = f"{days:.0f} days"
+    return f"<span style='color:{color}; font-weight:600'>{label}</span>"
+
+
+def render_section_header(title: str, icon: str = ""):
+    """Simple consistent section header used across tabs."""
+    import streamlit as st
+    st.markdown(f"### {icon} {title}" if icon else f"### {title}")

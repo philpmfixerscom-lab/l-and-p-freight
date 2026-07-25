@@ -215,6 +215,7 @@ def test_inventory_insert_and_recalculate(tmp_path, monkeypatch):
         level_to_tons,
         recalculate_days_of_supply,
         days_of_supply_color,
+        render_days_of_supply,
     )
 
     db_path = tmp_path / "test_inv.db"
@@ -251,10 +252,13 @@ def test_inventory_insert_and_recalculate(tmp_path, monkeypatch):
     assert level_to_tons("Empty", 24.0) == 0.0
     assert abs(level_to_tons("3/4", 24.0) - 18.0) < 0.01
     assert abs(level_to_tons("Full", 24.0) - 24.0) < 0.01
-    assert days_of_supply_color(None) == "amber"
-    assert days_of_supply_color(15.0) == "green"
-    assert days_of_supply_color(10.0) == "amber"
-    assert days_of_supply_color(3.0) == "red"
+    assert days_of_supply_color(None) == "#94a3b8"
+    assert days_of_supply_color(15.0) == "#4ade80"
+    assert days_of_supply_color(10.0) == "#fbbf24"
+    assert days_of_supply_color(3.0) == "#f87171"
+    assert render_days_of_supply(None) == "—"
+    assert "#4ade80" in render_days_of_supply(15.0)
+    assert "15 days" in render_days_of_supply(15.0)
 
 
 def test_inventory_recalculate_zero_avg(tmp_path, monkeypatch):
