@@ -249,9 +249,26 @@ def test_inventory_insert_and_recalculate(tmp_path, monkeypatch):
         assert latest["level"] == "3/4"
         assert latest["tons_est"] == 18.0
 
+        # lead last_estimate_* + days_of_supply_est updated
+        lead_row = conn.execute(
+            "SELECT last_estimate_level, last_estimate_tons, days_of_supply_est FROM leads WHERE id = ?",
+            (lead_id,),
+        ).fetchone()
+        assert lead_row["last_estimate_level"] == "3/4"
+        assert float(lead_row["last_estimate_tons"] or 0) == 18.0
+        assert lead_row["days_of_supply_est"] is not None
+        assert abs(float(lead_row["days_of_supply_est"]) - 12.6) < 0.2
+
     assert level_to_tons("Empty", 24.0) == 0.0
     assert abs(level_to_tons("3/4", 24.0) - 18.0) < 0.01
     assert abs(level_to_tons("Full", 24.0) - 24.0) < 0.01
+    # Driver-facing supply labels
+    from lp_helpers.inventory import BIN_LEVEL_OPTIONS
+
+    assert len(BIN_LEVEL_OPTIONS) == 5
+    assert level_to_tons("Empty / Near Empty", 24.0) == 0.0
+    assert abs(level_to_tons("Full / Overstocked", 24.0) - 24.0) < 0.01
+    assert abs(level_to_tons("Medium (3-7 days)", 24.0) - 10.8) < 0.01
     assert days_of_supply_color(None) == "#94a3b8"
     assert days_of_supply_color(15.0) == "#4ade80"
     assert days_of_supply_color(10.0) == "#fbbf24"

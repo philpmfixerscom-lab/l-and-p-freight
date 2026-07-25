@@ -12,12 +12,30 @@ from lp_helpers.database import ATTACHMENTS_DIR, get_conn
 
 
 INVENTORY_PHOTOS_DIR = ATTACHMENTS_DIR / "inventory_photos"
+
+# Driver-facing days-of-supply style labels (Phase 1 field form)
+BIN_LEVEL_OPTIONS: tuple[str, ...] = (
+    "Empty / Near Empty",
+    "Low (1-2 days)",
+    "Medium (3-7 days)",
+    "High (1-2 weeks)",
+    "Full / Overstocked",
+)
+
+# Fraction of bin capacity used when tons not entered (legacy + driver labels)
 LEVEL_TONS_MAP = {
+    # Legacy fraction labels (Dispatch / historical)
     "Empty": 0.0,
     "1/4": 0.25,
     "1/2": 0.5,
     "3/4": 0.75,
     "Full": 1.0,
+    # Driver-facing supply labels
+    "Empty / Near Empty": 0.0,
+    "Low (1-2 days)": 0.15,
+    "Medium (3-7 days)": 0.45,
+    "High (1-2 weeks)": 0.75,
+    "Full / Overstocked": 1.0,
 }
 
 
@@ -64,10 +82,16 @@ def insert_inventory_estimate(
             """
             UPDATE leads
             SET last_estimate_level = ?,
-                last_estimate_date = ?
+                last_estimate_date = ?,
+                last_estimate_tons = ?
             WHERE id = ?
             """,
-            (estimated_level, datetime.now().isoformat(), lead_id),
+            (
+                estimated_level,
+                datetime.now().isoformat(),
+                float(estimated_tons),
+                lead_id,
+            ),
         )
 
     return estimate_id

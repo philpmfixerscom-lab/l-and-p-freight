@@ -4865,7 +4865,7 @@ def render_inventory_tab() -> None:
         render_empty_state(
             "🗑️",
             "No bin estimates yet",
-            "Drivers log bin estimates from the driver app after delivery.",
+            "Drivers log bin estimates + silo photos from the Driver view at the silo.",
         )
     else:
         show_cols = [
