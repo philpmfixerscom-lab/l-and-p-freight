@@ -1089,6 +1089,21 @@ def init_database() -> None:
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inventory_estimates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER,
+            estimate_date TEXT DEFAULT (datetime('now')),
+            level TEXT NOT NULL,
+            tons_est REAL NOT NULL DEFAULT 0.0,
+            notes TEXT,
+            photo_paths TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+        """
+    )
+
     for lead in SEED_LEADS:
         existing = cursor.execute(
             "SELECT id FROM leads WHERE company = ?",
@@ -1191,6 +1206,40 @@ def fetch_call_logs() -> pd.DataFrame:
             )
     except Exception as exc:
         log.exception("fetch_call_logs failed")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_inventory_estimates(lead_id=None) -> pd.DataFrame:
+    """Return all inventory estimates, optionally filtered by lead_id."""
+    try:
+        conn = get_connection()
+        if lead_id is not None:
+            df = pd.read_sql_query(
+                """
+                SELECT ie.*, ld.name as shipper
+                FROM inventory_estimates ie
+                LEFT JOIN leads ld ON ie.lead_id = ld.id
+                WHERE ie.lead_id = ?
+                ORDER BY ie.estimate_date DESC, ie.id DESC
+                """,
+                conn,
+                params=(int(lead_id),),
+            )
+        else:
+            df = pd.read_sql_query(
+                """
+                SELECT ie.*, ld.name as shipper
+                FROM inventory_estimates ie
+                LEFT JOIN leads ld ON ie.lead_id = ld.id
+                ORDER BY ie.estimate_date DESC, ie.id DESC
+                """,
+                conn,
+            )
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"[fetch_inventory_estimates] {e}")
         return pd.DataFrame()
 
 
