@@ -1065,9 +1065,33 @@ def auto_backup_db() -> None:
 # ---------------------------------------------------------------------------
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA cache_size=-8000")
+        conn.execute("PRAGMA busy_timeout=10000")
+    except Exception as exc:
+        raise RuntimeError(f"Failed to configure SQLite connection: {exc}") from exc
     return conn
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def db_connection(timeout=10.0):
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def init_database() -> None:
@@ -1102,6 +1126,13 @@ def init_database() -> None:
             created_at TEXT DEFAULT (datetime('now'))
         )
         """
+    )
+
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_inv_lead_date ON inventory_estimates(lead_id, estimate_date DESC)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_loads_lead_date ON loads(lead_id, pickup_date DESC)"
     )
 
     for lead in SEED_LEADS:
@@ -1213,30 +1244,31 @@ def fetch_call_logs() -> pd.DataFrame:
 def fetch_inventory_estimates(lead_id=None) -> pd.DataFrame:
     """Return all inventory estimates, optionally filtered by lead_id."""
     try:
-        conn = get_connection()
-        if lead_id is not None:
-            df = pd.read_sql_query(
-                """
-                SELECT ie.*, ld.name as shipper
-                FROM inventory_estimates ie
-                LEFT JOIN leads ld ON ie.lead_id = ld.id
-                WHERE ie.lead_id = ?
-                ORDER BY ie.estimate_date DESC, ie.id DESC
-                """,
-                conn,
-                params=(int(lead_id),),
-            )
-        else:
-            df = pd.read_sql_query(
-                """
-                SELECT ie.*, ld.name as shipper
-                FROM inventory_estimates ie
-                LEFT JOIN leads ld ON ie.lead_id = ld.id
-                ORDER BY ie.estimate_date DESC, ie.id DESC
-                """,
-                conn,
-            )
-        conn.close()
+        with db_connection() as conn:
+            if lead_id is not None:
+                df = pd.read_sql_query(
+                    """
+                    SELECT ie.id, ie.lead_id, ie.estimate_date, ie.level, ie.tons_est,
+                           ie.notes, ie.photo_paths, ie.created_at, ld.name as shipper
+                    FROM inventory_estimates ie
+                    LEFT JOIN leads ld ON ie.lead_id = ld.id
+                    WHERE ie.lead_id = ?
+                    ORDER BY ie.estimate_date DESC, ie.id DESC
+                    """,
+                    conn,
+                    params=(int(lead_id),),
+                )
+            else:
+                df = pd.read_sql_query(
+                    """
+                    SELECT ie.id, ie.lead_id, ie.estimate_date, ie.level, ie.tons_est,
+                           ie.notes, ie.photo_paths, ie.created_at, ld.name as shipper
+                    FROM inventory_estimates ie
+                    LEFT JOIN leads ld ON ie.lead_id = ld.id
+                    ORDER BY ie.estimate_date DESC, ie.id DESC
+                    """,
+                    conn,
+                )
         return df
     except Exception as e:
         print(f"[fetch_inventory_estimates] {e}")
@@ -1250,6 +1282,12 @@ def clear_data_caches() -> None:
         _fetch_loads_cached.clear()
         fetch_call_logs.clear()
         fetch_lane_rates.clear()
+        fetch_inventory_estimates.clear()
+        try:
+            from lp_helpers.database import clear_cache as _db_clear_cache
+            _db_clear_cache()
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -3339,6 +3377,7 @@ def render_rate_calculator_tab(*, embedded: bool = False) -> None:
             )
             conn.commit()
             conn.close()
+            clear_data_caches()
             st.success(f"Saved ${input_rate:.2f}/ton benchmark for {origin} → {destination}")
             st.rerun()
 
@@ -4797,13 +4836,13 @@ def render_inventory_tab() -> None:
         show_cols = [
             c
             for c in [
-                "created_at",
+                "estimate_date",
                 "lead_id",
                 "load_id",
                 "commodity",
-                "estimated_level",
-                "estimated_tons",
-                "driver_notes",
+                "level",
+                "tons_est",
+                "notes",
                 "estimated_by",
             ]
             if c in estimates_df.columns

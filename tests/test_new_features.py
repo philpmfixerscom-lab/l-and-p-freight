@@ -246,8 +246,8 @@ def test_inventory_insert_and_recalculate(tmp_path, monkeypatch):
 
         latest = get_lead_inventory_latest(conn, lead_id)
         assert latest is not None
-        assert latest["estimated_level"] == "3/4"
-        assert latest["estimated_tons"] == 18.0
+        assert latest["level"] == "3/4"
+        assert latest["tons_est"] == 18.0
 
     assert level_to_tons("Empty", 24.0) == 0.0
     assert abs(level_to_tons("3/4", 24.0) - 18.0) < 0.01

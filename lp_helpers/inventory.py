@@ -42,8 +42,8 @@ def insert_inventory_estimate(
     cur = conn.execute(
         """
         INSERT INTO inventory_estimates
-            (lead_id, load_id, commodity, estimated_level, estimated_tons,
-             photo_paths, driver_notes, estimated_by)
+            (lead_id, load_id, commodity, level, tons_est,
+             photo_paths, notes, estimated_by)
         VALUES (?,?,?,?,?,?,?,?)
         """,
         (
@@ -91,7 +91,7 @@ def recalculate_days_of_supply(conn: Any, lead_id: int) -> float | None:
 
     est_row = conn.execute(
         """
-        SELECT estimated_tons FROM inventory_estimates
+        SELECT tons_est FROM inventory_estimates
         WHERE lead_id = ?
         ORDER BY created_at DESC
         LIMIT 1
@@ -101,7 +101,7 @@ def recalculate_days_of_supply(conn: Any, lead_id: int) -> float | None:
     if est_row is None:
         return None
 
-    estimated_tons = float(est_row["estimated_tons"] or 0)
+    estimated_tons = float(est_row["tons_est"] or 0)
     days = (estimated_tons / avg_weekly_tons) * 7.0
     days = round(days, 1)
 

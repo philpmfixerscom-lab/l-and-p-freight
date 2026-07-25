@@ -272,6 +272,10 @@ def _update_load_status(
                 (new_status, extra, load_id),
             )
             conn.commit()
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
         return True, new_status
     except Exception as exc:
         return False, str(exc)
@@ -599,6 +603,10 @@ def _render_bin_estimate(
                 if lead_id is not None:
                     days = recalculate_days_of_supply(conn, lead_id)
                 conn.commit()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
 
             st.session_state.bin_estimate_saved = {
                 "level": selected_level,

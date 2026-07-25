@@ -416,10 +416,11 @@ CREATE TABLE IF NOT EXISTS inventory_estimates (
     lead_id INTEGER,
     load_id INTEGER,
     commodity TEXT,
-    estimated_level TEXT NOT NULL,
-    estimated_tons REAL NOT NULL DEFAULT 0.0,
+    estimate_date TEXT DEFAULT (datetime('now')),
+    level TEXT NOT NULL,
+    tons_est REAL NOT NULL DEFAULT 0.0,
+    notes TEXT,
     photo_paths TEXT,
-    driver_notes TEXT,
     estimated_by TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (lead_id) REFERENCES leads(id),
@@ -452,10 +453,34 @@ CREATE TABLE IF NOT EXISTS load_photos (
 
 
 def get_conn() -> sqlite3.Connection:
-    """Return a SQLite connection with Row factory (safe for Streamlit threading)."""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    """Return a SQLite connection with Row factory and hardened PRAGMAs."""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA cache_size=-8000")
+        conn.execute("PRAGMA busy_timeout=10000")
+    except Exception as exc:
+        raise RuntimeError(f"Failed to configure SQLite connection: {exc}") from exc
     return conn
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def db_connection(timeout=10.0):
+    conn = get_conn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def clear_cache() -> None:
@@ -1050,6 +1075,11 @@ def init_db() -> None:
     with closing(get_conn()) as conn:
         conn.executescript(_SCHEMA_SQL)
         ensure_opportunities_table(conn)
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_lead_date ON inventory_estimates(lead_id, estimate_date DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_loads_lead_date ON loads(lead_id, pickup_date DESC)")
+        except Exception:
+            pass
 
         # Phase B multi-tenant: tenants table + tenant_id columns + backfill
         try:
@@ -1323,21 +1353,43 @@ def fetch_ai_suggestions() -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def fetch_inventory_estimates() -> pd.DataFrame:
-    with closing(get_conn()) as conn:
-        return pd.read_sql_query(
-            "SELECT * FROM inventory_estimates ORDER BY created_at DESC LIMIT 200",
-            conn,
-        )
+    try:
+        with db_connection() as conn:
+            return pd.read_sql_query(
+                """
+                SELECT ie.id, ie.lead_id, ie.estimate_date, ie.level, ie.tons_est,
+                       ie.notes, ie.photo_paths, ie.created_at, ld.name as shipper
+                FROM inventory_estimates ie
+                LEFT JOIN leads ld ON ie.lead_id = ld.id
+                ORDER BY ie.created_at DESC
+                LIMIT 200
+                """,
+                conn,
+            )
+    except Exception as exc:
+        print(f"[fetch_inventory_estimates] {exc}")
+        return pd.DataFrame()
 
 
 @st.cache_data(show_spinner=False)
 def fetch_lead_inventory_estimates(lead_id: int) -> pd.DataFrame:
-    with closing(get_conn()) as conn:
-        return pd.read_sql_query(
-            "SELECT * FROM inventory_estimates WHERE lead_id = ? ORDER BY created_at DESC",
-            conn,
-            params=(lead_id,),
-        )
+    try:
+        with db_connection() as conn:
+            return pd.read_sql_query(
+                """
+                SELECT ie.id, ie.lead_id, ie.estimate_date, ie.level, ie.tons_est,
+                       ie.notes, ie.photo_paths, ie.created_at, ld.name as shipper
+                FROM inventory_estimates ie
+                LEFT JOIN leads ld ON ie.lead_id = ld.id
+                WHERE ie.lead_id = ?
+                ORDER BY ie.created_at DESC
+                """,
+                conn,
+                params=(lead_id,),
+            )
+    except Exception as exc:
+        print(f"[fetch_lead_inventory_estimates] {exc}")
+        return pd.DataFrame()
 
 
 @st.cache_data(show_spinner=False)
