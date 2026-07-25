@@ -1117,23 +1117,58 @@ def init_database() -> None:
         """
         CREATE TABLE IF NOT EXISTS inventory_estimates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            lead_id INTEGER,
-            estimate_date TEXT DEFAULT (datetime('now')),
-            level TEXT NOT NULL,
-            tons_est REAL NOT NULL DEFAULT 0.0,
+            lead_id INTEGER NOT NULL,
+            load_id INTEGER,
+            commodity TEXT,
+            estimate_date TEXT NOT NULL,
+            level TEXT,
+            tons_est REAL,
             notes TEXT,
             photo_paths TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
+            estimated_by TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (lead_id) REFERENCES leads (id)
         )
         """
     )
 
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_inv_lead_date ON inventory_estimates(lead_id, estimate_date DESC)"
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_loads_lead_date ON loads(lead_id, pickup_date DESC)"
-    )
+    for col, typedef in [
+        ("estimate_date", "TEXT"),
+        ("level", "TEXT"),
+        ("tons_est", "REAL"),
+        ("notes", "TEXT"),
+        ("photo_paths", "TEXT"),
+        ("estimated_by", "TEXT"),
+        ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE inventory_estimates ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_lead ON inventory_estimates(lead_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_date ON inventory_estimates(estimate_date)")
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_lead_date ON inventory_estimates(lead_id, estimate_date DESC)")
+    except Exception as e:
+        print(f"[init] composite inv index skipped: {e}")
+
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_loads_lead_date ON loads(lead_id, pickup_date DESC)")
+    except Exception as e:
+        print(f"[init] composite loads index skipped: {e}")
+
+    lead_cols = {row[1] for row in cursor.execute("PRAGMA table_info(leads)").fetchall()}
+    for col, coltype in (
+        ("avg_weekly_tons", "REAL"),
+        ("bin_capacity_tons", "REAL"),
+        ("last_estimate_level", "TEXT"),
+        ("last_estimate_date", "TEXT"),
+        ("last_estimate_tons", "REAL"),
+        ("days_of_supply_est", "REAL"),
+    ):
+        if col not in lead_cols:
+            cursor.execute(f"ALTER TABLE leads ADD COLUMN {col} {coltype}")
 
     for lead in SEED_LEADS:
         existing = cursor.execute(

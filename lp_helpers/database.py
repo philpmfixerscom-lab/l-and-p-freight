@@ -1076,10 +1076,30 @@ def init_db() -> None:
         conn.executescript(_SCHEMA_SQL)
         ensure_opportunities_table(conn)
         try:
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_lead_date ON inventory_estimates(lead_id, estimate_date DESC)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_loads_lead_date ON loads(lead_id, pickup_date DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_lead ON inventory_estimates(lead_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_date ON inventory_estimates(estimate_date)")
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_inv_lead_date ON inventory_estimates(lead_id, estimate_date DESC)")
+            except Exception as e:
+                print(f"[init] composite inv index skipped: {e}")
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_loads_lead_date ON loads(lead_id, pickup_date DESC)")
+            except Exception as e:
+                print(f"[init] composite loads index skipped: {e}")
         except Exception:
             pass
+
+        lead_cols = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
+        for col, coltype in (
+            ("avg_weekly_tons", "REAL"),
+            ("bin_capacity_tons", "REAL"),
+            ("last_estimate_level", "TEXT"),
+            ("last_estimate_date", "TEXT"),
+            ("last_estimate_tons", "REAL"),
+            ("days_of_supply_est", "REAL"),
+        ):
+            if col not in lead_cols:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col} {coltype}")
 
         # Phase B multi-tenant: tenants table + tenant_id columns + backfill
         try:
