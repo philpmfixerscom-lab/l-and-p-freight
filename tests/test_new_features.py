@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
@@ -201,5 +202,75 @@ def test_required_new_modules_exist():
         "audit_log.py",
         "followup_templates.py",
         "analytics_dashboard.py",
+        "inventory.py",
     ):
         assert (helpers / name).is_file(), name
+
+
+def test_inventory_insert_and_recalculate(tmp_path, monkeypatch):
+    from lp_helpers.database import get_conn, init_db
+    from lp_helpers.inventory import (
+        get_lead_inventory_latest,
+        insert_inventory_estimate,
+        level_to_tons,
+        recalculate_days_of_supply,
+        days_of_supply_color,
+    )
+
+    db_path = tmp_path / "test_inv.db"
+    monkeypatch.setattr("lp_helpers.database.DB_PATH", db_path)
+    init_db()
+
+    with closing(get_conn()) as conn:
+        cur = conn.execute(
+            "INSERT INTO leads (company, status, avg_weekly_tons, bin_capacity_tons) VALUES (?,?,?,?)",
+            ("Test Shipper", "Hot", 10.0, 24.0),
+        )
+        lead_id = int(cur.lastrowid)
+
+        insert_inventory_estimate(
+            conn,
+            lead_id=lead_id,
+            load_id=None,
+            commodity="Feldspar",
+            estimated_level="3/4",
+            estimated_tons=18.0,
+            photo_paths=[],
+            driver_notes="scale: 18t",
+            estimated_by="Phillip",
+        )
+        days = recalculate_days_of_supply(conn, lead_id)
+        assert days is not None
+        assert abs(days - 12.6) < 0.2
+
+        latest = get_lead_inventory_latest(conn, lead_id)
+        assert latest is not None
+        assert latest["estimated_level"] == "3/4"
+        assert latest["estimated_tons"] == 18.0
+
+    assert level_to_tons("Empty", 24.0) == 0.0
+    assert abs(level_to_tons("3/4", 24.0) - 18.0) < 0.01
+    assert abs(level_to_tons("Full", 24.0) - 24.0) < 0.01
+    assert days_of_supply_color(None) == "amber"
+    assert days_of_supply_color(15.0) == "green"
+    assert days_of_supply_color(10.0) == "amber"
+    assert days_of_supply_color(3.0) == "red"
+
+
+def test_inventory_recalculate_zero_avg(tmp_path, monkeypatch):
+    from lp_helpers.database import get_conn, init_db
+    from lp_helpers.inventory import recalculate_days_of_supply
+
+    db_path = tmp_path / "test_inv_zero.db"
+    monkeypatch.setattr("lp_helpers.database.DB_PATH", db_path)
+    init_db()
+
+    with closing(get_conn()) as conn:
+        cur = conn.execute(
+            "INSERT INTO leads (company, status, avg_weekly_tons) VALUES (?,?,?)",
+            ("Zero Shipper", "Active", 0.0),
+        )
+        lead_id = int(cur.lastrowid)
+        days = recalculate_days_of_supply(conn, lead_id)
+        assert days is None
+

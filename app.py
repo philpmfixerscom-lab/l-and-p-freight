@@ -118,8 +118,9 @@ TAB_LABELS = [
     "🗺️ GPS",
     "📄 BOL",
     "📲 Alerts",
+    "🗑️ Inventory",
 ]
-TAB_KEYS = ["Dashboard", "Leads", "Logger", "Board", "Fleet", "GPS", "BOL", "Alerts"]
+TAB_KEYS = ["Dashboard", "Leads", "Logger", "Board", "Fleet", "GPS", "BOL", "Alerts", "Inventory"]
 
 FILTER_DEFAULTS: dict[str, str] = {
     "filter_leads_status": "All",
@@ -684,7 +685,9 @@ def inject_elite_dark_css() -> None:
 /* Large freight-visible buttons */
 .stButton > button,
 .stFormSubmitButton > button,
-.stDownloadButton > button {
+.stDownloadButton > button,
+.stLinkButton > a,
+div[data-testid="stLinkButton"] > a {
     width: 100% !important;
     min-height: 3.4rem !important;
     font-size: 1.15rem !important;
@@ -696,7 +699,9 @@ def inject_elite_dark_css() -> None:
     box-shadow: 0 4px 16px rgba(255, 107, 0, 0.4) !important;
     transition: all 0.15s ease;
 }
-.stButton > button:hover {
+.stButton > button:hover,
+.stLinkButton > a:hover,
+div[data-testid="stLinkButton"] > a:hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 22px rgba(255, 107, 0, 0.6) !important;
 }
@@ -861,6 +866,113 @@ def render_section_header(title: str, icon: str = "") -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def get_navigation_links(
+    origin: str = "Spruce Pine, NC",
+    destination: str = "Central Georgia Kohler area",
+) -> tuple[str, str]:
+    """Return Google Maps and Apple Maps deep-link URLs."""
+    from urllib.parse import quote_plus
+
+    origin_q = quote_plus(origin)
+    dest_q = quote_plus(destination)
+    google = (
+        f"https://www.google.com/maps/dir/?api=1"
+        f"&origin={origin_q}&destination={dest_q}&travelmode=driving"
+    )
+    apple = f"https://maps.apple.com/?saddr={origin_q}&daddr={dest_q}&dirflg=d"
+    return google, apple
+
+
+def _render_nav_link_button(label: str, url: str, *, key: str | None = None) -> None:
+    """Deep-link button: prefer st.link_button; markdown fallback for older Streamlit."""
+    if hasattr(st, "link_button"):
+        kwargs: dict[str, Any] = {"use_container_width": True}
+        if key is not None:
+            kwargs["key"] = key
+        try:
+            st.link_button(label, url, **kwargs)
+            return
+        except TypeError:
+            # Older Streamlit may not accept key=
+            st.link_button(label, url, use_container_width=True)
+            return
+    # Streamlit < 1.29 fallback — large, high-contrast orange action link
+    st.markdown(
+        f"""
+        <a href="{url}" target="_blank" rel="noopener noreferrer" style="
+            display: block;
+            text-align: center;
+            text-decoration: none;
+            background: linear-gradient(90deg, #FF6B00, #FF9500);
+            color: #ffffff;
+            border: none;
+            border-radius: 12px;
+            padding: 0.9rem 0.85rem;
+            margin-bottom: 0.35rem;
+            font-weight: 700;
+            font-size: 1.05rem;
+            box-shadow: 0 4px 14px rgba(255, 107, 0, 0.4);
+            min-height: 3.2rem;
+            line-height: 1.3;
+        ">{label}</a>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_navigation_card(
+    *,
+    origin_label: str = "Spruce Pine, NC (Sibelco / Covia / K-T area)",
+    destination_label: str = "Central Georgia – Kohler area / as directed",
+    origin_query: str = "Spruce Pine, NC",
+    destination_query: str = "Central Georgia Kohler area",
+    lane_note: str = "Lane: Spruce Pine NC → Central GA · ~275 miles · Ready for navigation",
+    title: str = "🗺️ Navigation",
+    key_prefix: str = "nav",
+) -> None:
+    """Primary cab-friendly GPS card — one-tap native Maps deep links (no map library)."""
+    st.subheader(title)
+    st.markdown(
+        f"""
+<div style="
+    background: rgba(30, 41, 59, 0.95);
+    border: 1px solid #334155;
+    border-left: 5px solid #FF9500;
+    border-radius: 12px;
+    padding: 1.2rem 1.4rem;
+    margin-bottom: 1rem;
+">
+    <div style="font-size: 0.8rem; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 0.25rem;">ORIGIN</div>
+    <div style="font-size: 1.2rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.9rem;">
+        {origin_label}
+    </div>
+    <div style="font-size: 0.8rem; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 0.25rem;">DESTINATION</div>
+    <div style="font-size: 1.2rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.7rem;">
+        {destination_label}
+    </div>
+    <div style="font-size: 0.85rem; color: #67e8f9;">
+        {lane_note}
+    </div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+    google_url, apple_url = get_navigation_links(origin_query, destination_query)
+    btn_col1, btn_col2 = st.columns(2)
+    with btn_col1:
+        _render_nav_link_button(
+            "🗺️ Open in Google Maps",
+            google_url,
+            key=f"{key_prefix}_google",
+        )
+    with btn_col2:
+        _render_nav_link_button(
+            "🍎 Open in Apple Maps",
+            apple_url,
+            key=f"{key_prefix}_apple",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -4537,10 +4649,70 @@ def main() -> None:
         render_bol_generator_tab()
     elif active == "Alerts":
         render_alerts_tab()
+    elif active == "Inventory":
+        render_inventory_tab()
     else:
         render_dashboard_tab()
 
     st.caption(f"{CARRIER_NAME} · {TAGLINE}")
+
+
+def render_inventory_tab() -> None:
+    from lp_helpers.database import fetch_inventory_estimates, fetch_leads
+    from lp_helpers.ui_components import days_of_supply_color, render_section_header
+
+    render_section_header("Bin Estimates", icon="🗑️")
+    st.caption("Driver bin-level estimates · days of supply = est_tons / avg_weekly_tons × 7")
+
+    estimates_df = fetch_inventory_estimates()
+    if estimates_df.empty:
+        from lp_helpers.ui_components import render_empty_state
+
+        render_empty_state(
+            "🗑️",
+            "No bin estimates yet",
+            "Drivers log bin estimates from the driver app after delivery.",
+        )
+    else:
+        show_cols = [
+            c
+            for c in [
+                "created_at",
+                "lead_id",
+                "load_id",
+                "commodity",
+                "estimated_level",
+                "estimated_tons",
+                "driver_notes",
+                "estimated_by",
+            ]
+            if c in estimates_df.columns
+        ]
+        st.dataframe(
+            estimates_df[show_cols].head(50),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    render_section_header("Lead Inventory Health", icon="📦")
+    leads_df = fetch_leads()
+    if leads_df.empty:
+        st.caption("No leads yet.")
+    else:
+        for _, lead in leads_df.iterrows():
+            dos_val = lead.get("days_of_s_supply_est")
+            try:
+                dos_val_f = float(dos_val) if dos_val is not None else None
+            except (TypeError, ValueError):
+                dos_val_f = None
+
+            level = str(lead.get("last_estimate_level") or "")
+            dos_color = days_of_supply_color(dos_val_f)
+            st.markdown(
+                f"**{lead.get('company', '—')}** · "
+                f"Last level: {level or '—'} · "
+                f"Days of supply: **:{dos_color}[{f'{dos_val_f:.1f}' if dos_val_f is not None else '—'}]**"
+            )
 
 
 

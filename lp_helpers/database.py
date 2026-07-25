@@ -411,6 +411,21 @@ CREATE TABLE IF NOT EXISTS eld_events (
     logged_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS inventory_estimates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER,
+    load_id INTEGER,
+    commodity TEXT,
+    estimated_level TEXT NOT NULL,
+    estimated_tons REAL NOT NULL DEFAULT 0.0,
+    photo_paths TEXT,
+    driver_notes TEXT,
+    estimated_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (lead_id) REFERENCES leads(id),
+    FOREIGN KEY (load_id) REFERENCES loads(id)
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     action TEXT NOT NULL,
@@ -561,7 +576,7 @@ _ALLOWED_TABLES = {
     "loads", "leads", "fuel", "telematics", "geofence_events", "call_logs",
     "maintenance", "sms_log", "compliance", "ai_suggestions", "app_settings",
     "assets", "settlements", "routes", "customers", "purchase_orders", "po_loads",
-    "eld_events", "audit_log", "load_photos", "opportunities",
+    "eld_events", "audit_log", "load_photos", "opportunities", "inventory_estimates",
 }
 
 
@@ -1105,6 +1120,17 @@ def init_db() -> None:
         if "trailer_name" not in load_cols:
             conn.execute("ALTER TABLE loads ADD COLUMN trailer_name TEXT")
 
+        lead_cols = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
+        for col, coltype in (
+            ("avg_weekly_tons", "REAL"),
+            ("bin_capacity_tons", "REAL"),
+            ("last_estimate_level", "TEXT"),
+            ("last_estimate_date", "TEXT"),
+            ("days_of_supply_est", "REAL"),
+        ):
+            if col not in lead_cols:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col} {coltype}")
+
         try:
             from lp_helpers.audit_log import ensure_audit_table
             from lp_helpers.load_photos import ensure_load_photos_table, ensure_photos_dir
@@ -1291,6 +1317,37 @@ def fetch_ai_suggestions() -> pd.DataFrame:
     with closing(get_conn()) as conn:
         return pd.read_sql_query(
             "SELECT * FROM ai_suggestions WHERE dismissed = 0 ORDER BY id DESC",
+            conn,
+        )
+
+
+@st.cache_data(show_spinner=False)
+def fetch_inventory_estimates() -> pd.DataFrame:
+    with closing(get_conn()) as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM inventory_estimates ORDER BY created_at DESC LIMIT 200",
+            conn,
+        )
+
+
+@st.cache_data(show_spinner=False)
+def fetch_lead_inventory_estimates(lead_id: int) -> pd.DataFrame:
+    with closing(get_conn()) as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM inventory_estimates WHERE lead_id = ? ORDER BY created_at DESC",
+            conn,
+            params=(lead_id,),
+        )
+
+
+@st.cache_data(show_spinner=False)
+def fetch_leads_with_inventory() -> pd.DataFrame:
+    with closing(get_conn()) as conn:
+        return pd.read_sql_query(
+            """
+            SELECT * FROM leads
+            ORDER BY priority, company
+            """,
             conn,
         )
 

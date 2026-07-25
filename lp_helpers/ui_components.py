@@ -334,6 +334,28 @@ def render_lead_card(lead: pd.Series | dict[str, Any]) -> None:
     phone_clean = re.sub(r"[^\d+]", "", str(lead.get("phone", "")))
     hot = lead.get("status") == "Hot"
     border = "var(--lf-orange)" if hot else "var(--lf-blue)"
+
+    dos_val = lead.get("days_of_supply_est")
+    try:
+        dos_val_f = float(dos_val) if dos_val is not None else None
+    except (TypeError, ValueError):
+        dos_val_f = None
+    dos_color = "green" if (dos_val_f is not None and dos_val_f > 14) else ("orange" if (dos_val_f is not None and dos_val_f >= 7) else "red")
+    last_level = str(lead.get("last_estimate_level") or "")
+
+    inventory_badge = ""
+    if last_level or dos_val_f is not None:
+        parts = []
+        if last_level:
+            parts.append(f"Last bin: {last_level}")
+        if dos_val_f is not None:
+            parts.append(f"DoS {dos_val_f:.1f}d")
+        badge_text = " · ".join(parts)
+        inventory_badge = f'<span class="lf-badge status" style="background:rgba(34,197,94,0.18);color:#4ade80;border:1px solid rgba(34,197,94,0.35);">📦 {badge_text}</span>' if dos_color == "green" else (
+            f'<span class="lf-badge status" style="background:rgba(251,191,36,0.18);color:#fbbf24;border:1px solid rgba(251,191,36,0.35);">📦 {badge_text}</span>' if dos_color == "orange" else
+            f'<span class="lf-badge status" style="background:rgba(239,68,68,0.18);color:#f87171;border:1px solid rgba(239,68,68,0.35);">📦 {badge_text}</span>'
+        )
+
     prefix = "🔥 " if hot else ""
     st.markdown(
         f"""
@@ -345,6 +367,7 @@ def render_lead_card(lead: pd.Series | dict[str, Any]) -> None:
             <div class="lf-lead-meta">
                 {lead.get('commodity_focus', '—')} · {lead.get('lane_notes', '')}
             </div>
+            {f'<div style="margin-top:0.35rem;">{inventory_badge}</div>' if inventory_badge else ''}
         </div>
         """,
         unsafe_allow_html=True,

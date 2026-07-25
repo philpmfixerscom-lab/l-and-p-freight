@@ -115,7 +115,9 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
     color: var(--cabin-text) !important;
 }
 
-.stButton > button {
+.stButton > button,
+.stLinkButton > a,
+div[data-testid="stLinkButton"] > a {
     min-height: var(--cabin-touch) !important;
     font-size: 1rem !important;
     font-weight: 700 !important;
@@ -351,6 +353,78 @@ def render_billing_card(load: dict[str, Any]):
     st.metric("Miles", f"{load.get('loaded_miles', 0) + load.get('empty_miles', 0):.0f} total")
 
 
+def get_navigation_links(
+    origin: str = "Spruce Pine, NC",
+    destination: str = "Central Georgia Kohler area",
+) -> tuple[str, str]:
+    """Return Google Maps and Apple Maps deep-link URLs for one-tap cab nav."""
+    from urllib.parse import quote_plus
+
+    origin_q = quote_plus(origin)
+    dest_q = quote_plus(destination)
+    google = (
+        f"https://www.google.com/maps/dir/?api=1"
+        f"&origin={origin_q}&destination={dest_q}&travelmode=driving"
+    )
+    apple = f"https://maps.apple.com/?saddr={origin_q}&daddr={dest_q}&dirflg=d"
+    return google, apple
+
+
+def render_driver_navigation_card(
+    origin: str = "Spruce Pine, NC",
+    destination: str = "Central Georgia Kohler area",
+) -> None:
+    """Primary driver GPS — large one-tap native maps (preferred over interactive map)."""
+    st.markdown('<div class="cabin-section-title">🗺️ Navigation</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+<div style="
+    background: var(--cabin-card);
+    border: 1px solid var(--cabin-border);
+    border-left: 5px solid var(--cabin-orange);
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 0.75rem;
+">
+    <div style="font-size: 0.75rem; color: var(--cabin-muted); letter-spacing: 0.5px; margin-bottom: 0.2rem;">ORIGIN</div>
+    <div style="font-size: 1.1rem; font-weight: 700; color: var(--cabin-text); margin-bottom: 0.75rem;">
+        Spruce Pine, NC (Sibelco / Covia / K-T area)
+    </div>
+    <div style="font-size: 0.75rem; color: var(--cabin-muted); letter-spacing: 0.5px; margin-bottom: 0.2rem;">DESTINATION</div>
+    <div style="font-size: 1.1rem; font-weight: 700; color: var(--cabin-text); margin-bottom: 0.55rem;">
+        Central Georgia – Kohler area / as directed
+    </div>
+    <div style="font-size: 0.8rem; color: #67e8f9;">
+        Lane: Spruce Pine NC → Central GA · ~275 miles · Ready for navigation
+    </div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+    google_url, apple_url = get_navigation_links(origin, destination)
+    b1, b2 = st.columns(2)
+    with b1:
+        if hasattr(st, "link_button"):
+            st.link_button("🗺️ Open in Google Maps", google_url, use_container_width=True)
+        else:
+            st.markdown(
+                f'<a href="{google_url}" target="_blank" rel="noopener noreferrer" '
+                f'style="display:block;text-align:center;text-decoration:none;background:var(--cabin-orange);'
+                f'color:#fff;border-radius:14px;padding:0.95rem;font-weight:700;">🗺️ Open in Google Maps</a>',
+                unsafe_allow_html=True,
+            )
+    with b2:
+        if hasattr(st, "link_button"):
+            st.link_button("🍎 Open in Apple Maps", apple_url, use_container_width=True)
+        else:
+            st.markdown(
+                f'<a href="{apple_url}" target="_blank" rel="noopener noreferrer" '
+                f'style="display:block;text-align:center;text-decoration:none;background:var(--cabin-orange);'
+                f'color:#fff;border-radius:14px;padding:0.95rem;font-weight:700;">🍎 Open in Apple Maps</a>',
+                unsafe_allow_html=True,
+            )
+
+
 def render_route_map_stub():
     st.markdown('<div class="cabin-section-title">🗺️ Route</div>', unsafe_allow_html=True)
     st.markdown(
@@ -369,6 +443,8 @@ def render_route_map_stub():
 
 
 def home_screen():
+    # Primary driver GPS first — one-tap native navigation
+    render_driver_navigation_card()
     st.markdown('<div class="cabin-section-title">📊 Status</div>', unsafe_allow_html=True)
     render_status_cards()
     render_current_load(CURRENT_LOAD)
@@ -423,6 +499,8 @@ def hos_screen():
 
 def route_screen():
     st.markdown('<div class="cabin-section-title">🗺️ Route & Tracking</div>', unsafe_allow_html=True)
+    # Primary: native maps deep links (preferred for cab turn-by-turn)
+    render_driver_navigation_card()
     render_route_map_stub()
     routes_df = fetch_routes(load_id=1) if "fetch_routes" in globals() else pd.DataFrame()
     if not routes_df.empty:
