@@ -1140,11 +1140,24 @@ def init_database() -> None:
         ("photo_paths", "TEXT"),
         ("estimated_by", "TEXT"),
         ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+        # Legacy dual-schema columns (older DBs used estimated_* / driver_notes)
+        ("estimated_level", "TEXT"),
+        ("estimated_tons", "REAL"),
+        ("driver_notes", "TEXT"),
+        ("commodity", "TEXT"),
+        ("load_id", "INTEGER"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE inventory_estimates ADD COLUMN {col} {typedef}")
         except Exception:
             pass
+
+    try:
+        from lp_helpers.inventory import ensure_inventory_estimate_columns
+
+        ensure_inventory_estimate_columns(conn)
+    except Exception as e:
+        print(f"[init] inventory dual-schema ensure skipped: {e}")
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_lead ON inventory_estimates(lead_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_date ON inventory_estimates(estimate_date)")
@@ -1277,33 +1290,25 @@ def fetch_call_logs() -> pd.DataFrame:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_inventory_estimates(lead_id=None) -> pd.DataFrame:
-    """Return all inventory estimates, optionally filtered by lead_id."""
+    """Return all inventory estimates, optionally filtered by lead_id.
+
+    Dual-schema safe: COALESCE(level, estimated_level) / tons / notes;
+    joins leads.company (not ld.name).
+    """
     try:
+        from lp_helpers.inventory import (
+            ensure_inventory_estimate_columns,
+            inventory_estimates_select_sql,
+        )
+
         with db_connection() as conn:
+            cols = ensure_inventory_estimate_columns(conn)
             if lead_id is not None:
-                df = pd.read_sql_query(
-                    """
-                    SELECT ie.id, ie.lead_id, ie.estimate_date, ie.level, ie.tons_est,
-                           ie.notes, ie.photo_paths, ie.created_at, ld.name as shipper
-                    FROM inventory_estimates ie
-                    LEFT JOIN leads ld ON ie.lead_id = ld.id
-                    WHERE ie.lead_id = ?
-                    ORDER BY ie.estimate_date DESC, ie.id DESC
-                    """,
-                    conn,
-                    params=(int(lead_id),),
-                )
+                sql = inventory_estimates_select_sql(cols, where_lead=True)
+                df = pd.read_sql_query(sql, conn, params=(int(lead_id),))
             else:
-                df = pd.read_sql_query(
-                    """
-                    SELECT ie.id, ie.lead_id, ie.estimate_date, ie.level, ie.tons_est,
-                           ie.notes, ie.photo_paths, ie.created_at, ld.name as shipper
-                    FROM inventory_estimates ie
-                    LEFT JOIN leads ld ON ie.lead_id = ld.id
-                    ORDER BY ie.estimate_date DESC, ie.id DESC
-                    """,
-                    conn,
-                )
+                sql = inventory_estimates_select_sql(cols, limit=200)
+                df = pd.read_sql_query(sql, conn)
         return df
     except Exception as e:
         print(f"[fetch_inventory_estimates] {e}")

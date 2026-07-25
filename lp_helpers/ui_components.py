@@ -671,9 +671,3 @@ def render_days_of_supply(days: float | None) -> str:
     color = days_of_supply_color(days)
     label = f"{days:.0f} days"
     return f"<span style='color:{color}; font-weight:600'>{label}</span>"
-
-
-def render_section_header(title: str, icon: str = ""):
-    """Simple consistent section header used across tabs."""
-    import streamlit as st
-    st.markdown(f"### {icon} {title}" if icon else f"### {title}")

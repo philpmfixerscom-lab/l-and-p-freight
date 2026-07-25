@@ -295,3 +295,99 @@ def test_inventory_recalculate_zero_avg(tmp_path, monkeypatch):
         days = recalculate_days_of_supply(conn, lead_id)
         assert days is None
 
+
+def test_inventory_dual_schema_legacy_not_null(tmp_path, monkeypatch):
+    """Production DBs may have estimated_level NOT NULL — insert must dual-write."""
+    import sqlite3
+
+    from lp_helpers.inventory import (
+        ensure_inventory_estimate_columns,
+        get_lead_inventory_latest,
+        insert_inventory_estimate,
+        inventory_estimates_select_sql,
+        recalculate_days_of_supply,
+    )
+
+    db_path = tmp_path / "legacy_inv.db"
+    monkeypatch.setattr("lp_helpers.database.DB_PATH", db_path)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company TEXT NOT NULL,
+            avg_weekly_tons REAL,
+            bin_capacity_tons REAL,
+            last_estimate_level TEXT,
+            last_estimate_date TEXT,
+            last_estimate_tons REAL,
+            days_of_supply_est REAL
+        );
+        CREATE TABLE inventory_estimates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER,
+            load_id INTEGER,
+            commodity TEXT,
+            estimated_level TEXT NOT NULL,
+            estimated_tons REAL NOT NULL DEFAULT 0.0,
+            photo_paths TEXT,
+            driver_notes TEXT,
+            estimated_by TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        """
+    )
+    cur = conn.execute(
+        "INSERT INTO leads (company, avg_weekly_tons, bin_capacity_tons) VALUES (?,?,?)",
+        ("Legacy Shipper", 14.0, 24.0),
+    )
+    lead_id = int(cur.lastrowid)
+    conn.commit()
+
+    cols = ensure_inventory_estimate_columns(conn)
+    assert "level" in cols and "estimated_level" in cols
+
+    eid = insert_inventory_estimate(
+        conn,
+        lead_id=lead_id,
+        load_id=None,
+        commodity="Feldspar",
+        estimated_level="Medium (3-7 days)",
+        estimated_tons=10.8,
+        photo_paths=["a.jpg"],
+        driver_notes="silo check",
+        estimated_by="Driver",
+    )
+    assert eid >= 1
+    days = recalculate_days_of_supply(conn, lead_id)
+    assert days is not None
+    # 10.8 / 14 * 7 ≈ 5.4
+    assert abs(days - 5.4) < 0.2
+
+    row = conn.execute(
+        "SELECT estimated_level, level, estimated_tons, tons_est, driver_notes, notes FROM inventory_estimates WHERE id=?",
+        (eid,),
+    ).fetchone()
+    assert row["estimated_level"] == "Medium (3-7 days)"
+    assert row["level"] == "Medium (3-7 days)"
+    assert float(row["estimated_tons"]) == 10.8
+    assert float(row["tons_est"]) == 10.8
+    assert row["driver_notes"] == "silo check"
+    assert row["notes"] == "silo check"
+
+    latest = get_lead_inventory_latest(conn, lead_id)
+    assert latest is not None
+    assert latest["level"] == "Medium (3-7 days)"
+    assert latest["tons_est"] == 10.8
+
+    sql = inventory_estimates_select_sql(cols, where_lead=True)
+    import pandas as pd
+
+    df = pd.read_sql_query(sql, conn, params=(lead_id,))
+    assert not df.empty
+    assert df.iloc[0]["level"] == "Medium (3-7 days)"
+    assert df.iloc[0]["shipper"] == "Legacy Shipper"
+    conn.close()
+

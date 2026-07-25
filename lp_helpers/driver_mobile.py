@@ -585,10 +585,13 @@ def _render_bin_estimate(
                 break
 
     if lead_labels:
+        # Prefer session key; seed default shipper from active load once
+        default_label = lead_labels[min(default_index, len(lead_labels) - 1)]
+        if st.session_state.get("bin_est_lead") not in lead_labels:
+            st.session_state.bin_est_lead = default_label
         pick_label = st.selectbox(
             "Shipper / Lead",
             lead_labels,
-            index=min(default_index, len(lead_labels) - 1),
             key="bin_est_lead",
         )
         selected_lead = lead_by_label.get(pick_label) or {}
