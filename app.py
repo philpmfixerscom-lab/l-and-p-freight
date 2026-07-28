@@ -4078,7 +4078,12 @@ def render_gps_tracking_tab() -> None:
                     ),
                     icon=folium.Icon(color=icon_color, icon="truck", prefix="fa"),
                 ).add_to(fmap)
-            st_folium(fmap, width=700, height=420, returned_objects=[])
+            st_folium(
+                fmap,
+                height=480,
+                use_container_width=True,
+                returned_objects=[],
+            )
         else:
             st.caption("Map unavailable — install folium and streamlit-folium.")
 
