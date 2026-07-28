@@ -750,18 +750,42 @@ div[data-testid="stHorizontalBlock"] { gap: 0.7rem; }
     border-right: 2px solid #334155;
 }
 
-/* GPS status badges (app-specific) */
+/* GPS status badges */
+.lf-gps-status {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
+    margin: 0.25rem 0 1rem;
+}
 .lf-gps-badge {
-    display: inline-block; padding: 0.25rem 0.65rem; border-radius: 20px;
-    font-size: 0.75rem; font-weight: 700; margin-right: 0.5rem;
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    padding: 0.55rem 1.15rem; border-radius: 999px;
+    font-size: 1.05rem; font-weight: 800; letter-spacing: 0.04em;
+    line-height: 1.2;
+}
+.lf-gps-badge .lf-gps-dot {
+    width: 0.65rem; height: 0.65rem; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 0 3px rgba(255,255,255,0.08);
 }
 .lf-gps-badge.live {
-    background: rgba(74, 222, 128, 0.15); color: #4ade80;
-    border: 1px solid rgba(74, 222, 128, 0.4);
+    background: rgba(34, 197, 94, 0.16); color: #4ade80;
+    border: 2px solid rgba(74, 222, 128, 0.55);
 }
 .lf-gps-badge.sim {
-    background: rgba(255, 107, 0, 0.15); color: #FF9500;
-    border: 1px solid rgba(255, 107, 0, 0.4);
+    background: rgba(245, 158, 11, 0.16); color: #fbbf24;
+    border: 2px solid rgba(251, 191, 36, 0.55);
+}
+.lf-gps-badge.offline {
+    background: rgba(239, 68, 68, 0.14); color: #f87171;
+    border: 2px solid rgba(248, 113, 113, 0.5);
+}
+.lf-gps-meta {
+    font-size: 0.9rem; color: #94a3b8; font-weight: 600;
+}
+.lf-gps-conn {
+    background: rgba(15, 23, 42, 0.35);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 14px;
+    padding: 0.85rem 1rem 0.35rem;
+    margin-bottom: 1rem;
 }
 </style>
         """,
@@ -3758,38 +3782,67 @@ def render_fleet_tab() -> None:
         st.error(f"Fleet view unavailable: {exc}")
 
 
+def _gps_mode_badge_html(mode: str, meta: str = "") -> str:
+    """Big status pill for LIVE / SIMULATION / OFFLINE."""
+    labels = {
+        "live": ("live", "LIVE"),
+        "simulation": ("sim", "SIMULATION"),
+        "offline": ("offline", "OFFLINE"),
+    }
+    css, label = labels.get(mode, ("offline", "OFFLINE"))
+    meta_html = f'<span class="lf-gps-meta">{meta}</span>' if meta else ""
+    return (
+        f'<div class="lf-gps-status">'
+        f'<span class="lf-gps-badge {css}"><span class="lf-gps-dot"></span>{label}</span>'
+        f"{meta_html}</div>"
+    )
+
+
+def _human_traccar_unreachable(url: str) -> str:
+    display = (url or "your Traccar server").strip() or "your Traccar server"
+    return (
+        f"Traccar is not reachable at {display}. "
+        "Start the Traccar server or enable Simulation fallback."
+    )
+
+
 def render_gps_tracking_tab() -> None:
-    st.header("Traccar GPS Fleet Tracking")
-    st.subheader("Live Truck Locations")
-    st.caption(f"{TRUCK_LABEL} · Spruce Pine → Central GA · geofence alerts · sim fallback")
+    st.header("GPS")
+    st.caption(f"{TRUCK_LABEL} · Spruce Pine → Central GA")
+
+    # Slot at top — filled after connection probe so badge is first visually
+    status_slot = st.empty()
+    message_slot = st.empty()
 
     default_url = get_secret("traccar", "url", "http://localhost:8082")
     default_token = get_secret("traccar", "api_token", "")
 
+    # ── Connection (compact) ──────────────────────────────────────────
+    st.markdown('<div class="lf-gps-conn">', unsafe_allow_html=True)
     cfg1, cfg2 = st.columns(2)
     traccar_url = cfg1.text_input(
         "Traccar Server URL",
         value=st.session_state.get("traccar_url_input", default_url),
-        placeholder="http://your-traccar-server:8082",
+        placeholder="http://localhost:8082",
         key="traccar_url_input",
     )
     traccar_key = cfg2.text_input(
         "API Token / Key",
         value=st.session_state.get("traccar_api_key_input", default_token),
         type="password",
-        placeholder="Bearer token or email:password",
+        placeholder="Optional if email/password is in secrets.toml",
         key="traccar_api_key_input",
     )
-
-    opt1, opt2, opt3 = st.columns(3)
+    opt1, opt2 = st.columns([1.4, 1])
     live_sim = opt1.toggle(
         "Simulation fallback",
         value=st.session_state.get("gps_live_sim", "1") == "1",
         key="gps_sim_toggle",
+        help="When Traccar is down, show a simulated truck on the homebound lane.",
     )
     save_filter("gps_live_sim", "1" if live_sim else "0")
-    opt2.caption("Leave token blank to use email/password from secrets.toml")
-    refresh_clicked = opt3.button("Refresh GPS", type="primary", use_container_width=True)
+    refresh_clicked = opt2.button("Refresh GPS", type="primary", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if refresh_clicked:
         clear_traccar_cache()
@@ -3800,158 +3853,183 @@ def render_gps_tracking_tab() -> None:
     url, token, email, password = _traccar_connection_params()
     traccar = get_traccar_live()
 
-    if refresh_clicked or st.session_state.get("gps_auto_fetch", True):
-        conn_status, fleet, devices = _cached_traccar_fleet(url, token, email, password)
-    else:
-        conn_status, fleet, devices = traccar.connection_status(), [], []
+    # Always probe (cached); Refresh clears cache first
+    conn_status, fleet, devices = _cached_traccar_fleet(url, token, email, password)
+    live_units = [f for f in fleet if f.get("latitude") is not None]
+    connected = bool(conn_status.get("ok"))
 
     if "gps_sim_progress" not in st.session_state:
         st.session_state.gps_sim_progress = 0.0
-    if live_sim:
+
+    # Mode: LIVE > SIMULATION > OFFLINE
+    using_sim = False
+    map_fleet: list[dict[str, Any]] = []
+    if connected:
+        mode = "live"
+        map_fleet = list(live_units)
+        meta = f"{len(devices)} device(s) · {len(live_units)} with position"
+        if conn_status.get("version"):
+            meta += f" · v{conn_status['version']}"
+    elif live_sim:
+        mode = "simulation"
+        using_sim = True
         st.session_state.gps_sim_progress = (st.session_state.gps_sim_progress + 0.03) % 1.0
-
-    live_units = [f for f in fleet if f.get("latitude") is not None]
-    using_sim = not conn_status.get("ok") or not live_units
-
-    if conn_status.get("ok"):
-        st.success(
-            f"Connected to Traccar — {len(devices)} device(s), "
-            f"{len(live_units)} with live position"
-        )
-    elif refresh_clicked:
-        st.error(f"Connection failed — {conn_status.get('message', 'check Traccar server')}")
+        sim_lat, sim_lon, _sim_label = interpolate_route(st.session_state.gps_sim_progress)
+        map_fleet = [
+            {
+                "device_name": f"{TRUCK_LABEL} (Sim)",
+                "latitude": sim_lat,
+                "longitude": sim_lon,
+                "speed_mph": 58.0,
+                "status": "simulation",
+            }
+        ]
+        meta = "Lane demo · not a live fix"
     else:
-        st.warning(f"Traccar offline — {conn_status.get('message', 'not connected')}")
+        mode = "offline"
+        meta = "No live feed"
 
-    if using_sim and live_sim:
-        sim_lat, sim_lon, sim_label = interpolate_route(st.session_state.gps_sim_progress)
-        primary = {
-            "device_name": f"{TRUCK_LABEL} (Sim)",
-            "latitude": sim_lat,
-            "longitude": sim_lon,
-            "speed_mph": 58.0,
-            "status": "simulation",
-        }
-        map_fleet = [primary]
-        st.markdown(
-            '<span class="lf-gps-badge sim">● SIMULATION</span>',
-            unsafe_allow_html=True,
+    status_slot.markdown(_gps_mode_badge_html(mode, meta), unsafe_allow_html=True)
+
+    if mode == "offline":
+        message_slot.warning(_human_traccar_unreachable(url))
+    elif mode == "simulation":
+        message_slot.caption(
+            "Showing simulated position on the Spruce Pine → Central GA lane. "
+            "Turn off Simulation fallback once Traccar is running."
         )
-    elif live_units:
-        map_fleet = live_units
-        st.markdown(
-            '<span class="lf-gps-badge live">● LIVE TRACCAR FLEET</span>',
-            unsafe_allow_html=True,
+    elif mode == "live" and not live_units:
+        message_slot.info(
+            "Connected to Traccar, but no devices are reporting a position yet."
         )
     else:
-        map_fleet = []
-        st.error("No GPS data — check Traccar server or enable simulation fallback.")
+        message_slot.empty()
 
+    # ── Position cards (only when data exists) ────────────────────────
     if map_fleet:
         primary = map_fleet[0]
-        lat = primary["latitude"]
-        lon = primary["longitude"]
-        speed = primary.get("speed_mph", 0)
-        device_name = primary.get("device_name", TRUCK_LABEL)
+        lat = primary.get("latitude")
+        lon = primary.get("longitude")
+        if lat is not None and lon is not None:
+            speed = float(primary.get("speed_mph") or 0)
+            device_name = str(primary.get("device_name") or TRUCK_LABEL)
+            label_prefix = "Sim · " if using_sim else ""
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Latitude", f"{lat:.5f}")
-        m2.metric("Longitude", f"{lon:.5f}")
-        m3.metric("Speed", f"{speed:.0f} mph")
-        m4.metric("Primary unit", str(device_name)[:22])
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric(f"{label_prefix}Latitude", f"{float(lat):.5f}")
+            m2.metric(f"{label_prefix}Longitude", f"{float(lon):.5f}")
+            m3.metric(f"{label_prefix}Speed", f"{speed:.0f} mph")
+            m4.metric(f"{label_prefix}Primary unit", device_name[:22])
 
-        if not using_sim and st.button("Save primary fix to telematics", use_container_width=True):
-            try:
-                with closing(get_connection()) as conn:
-                    traccar.persist_telematics(conn, primary)
-                st.success("Position logged to telematics table.")
-            except Exception as exc:
-                st.error(str(exc))
+            if not using_sim and st.button(
+                "Save primary fix to telematics",
+                use_container_width=True,
+                type="secondary",
+            ):
+                try:
+                    with closing(get_connection()) as conn:
+                        traccar.persist_telematics(conn, primary)
+                    st.success("Position logged to telematics.")
+                except Exception as exc:
+                    log.exception("Telematics persist failed")
+                    st.error("Could not save position. Check the database and try again.")
 
-        geofences = LAWSON_GEOFENCES
+            # Geofence (quiet — only when inside)
+            def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+                from math import asin, cos, radians, sin, sqrt
 
-        def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-            from math import asin, cos, radians, sin, sqrt
+                r = 3958.8
+                dlat = radians(lat2 - lat1)
+                dlon = radians(lon2 - lon1)
+                a = (
+                    sin(dlat / 2) ** 2
+                    + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+                )
+                return 2 * r * asin(sqrt(a))
 
-            r = 3958.8
-            dlat = radians(lat2 - lat1)
-            dlon = radians(lon2 - lon1)
-            a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
-            return 2 * r * asin(sqrt(a))
+            for gf_name, gf_lat, gf_lon, gf_radius_mi in LAWSON_GEOFENCES:
+                dist = _haversine_mi(float(lat), float(lon), gf_lat, gf_lon)
+                if dist <= gf_radius_mi:
+                    st.success(f"Inside geofence: **{gf_name}** ({dist:.1f} mi from center)")
+                    if st.button(
+                        f"Log arrival for {gf_name}",
+                        key=f"gps_arrival_{gf_name}",
+                        type="secondary",
+                    ):
+                        body = format_sms(
+                            "arrival", {"location": gf_name, "company": "Dispatch"}
+                        )
+                        log_sms_event(None, "geofence_arrival", body, "gps_geofence")
+                        st.info("Arrival logged — send from the Alerts tab.")
 
-        for gf_name, gf_lat, gf_lon, gf_radius_mi in geofences:
-            dist = _haversine_mi(lat, lon, gf_lat, gf_lon)
-            if dist <= gf_radius_mi:
-                st.success(f"Geofence alert: inside **{gf_name}** ({dist:.1f} mi from center)")
-                if st.button(f"Log arrival SMS for {gf_name}", key=f"gps_arrival_{gf_name}"):
-                    body = format_sms("arrival", {"location": gf_name, "company": "Dispatch"})
-                    log_sms_event(None, "geofence_arrival", body, "gps_geofence")
-                    st.info("Arrival alert logged — send from **Alerts** tab.")
-
-        if HAS_FOLIUM:
-            center_lat = lat
-            center_lon = lon
-            fmap = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB dark_matter")
-            route_coords = [(p[0], p[1]) for p in SIM_ROUTE]
-            folium.PolyLine(route_coords, color="#ff8c42", weight=4, opacity=0.85).add_to(fmap)
-            for gf_name, gf_lat, gf_lon, gf_radius_mi in geofences:
-                folium.Circle(
-                    [gf_lat, gf_lon],
-                    radius=int(gf_radius_mi * 1609),
-                    color="#5eead4",
-                    fill=True,
-                    fill_opacity=0.12,
-                    popup=gf_name,
+            if HAS_FOLIUM:
+                fmap = folium.Map(
+                    location=[float(lat), float(lon)],
+                    zoom_start=8,
+                    tiles="CartoDB dark_matter",
+                )
+                route_coords = [(p[0], p[1]) for p in SIM_ROUTE]
+                folium.PolyLine(
+                    route_coords, color="#ff8c42", weight=4, opacity=0.85
                 ).add_to(fmap)
-            for unit in map_fleet:
-                if unit.get("latitude") is None:
-                    continue
-                icon_color = "green" if unit.get("status") == "online" else "orange"
-                folium.Marker(
-                    [unit["latitude"], unit["longitude"]],
-                    popup=(
-                        f"{unit.get('device_name', 'Truck')} · "
-                        f"{unit.get('speed_mph', 0):.0f} mph · {unit.get('status', '?')}"
-                    ),
-                    icon=folium.Icon(color=icon_color, icon="truck", prefix="fa"),
-                ).add_to(fmap)
-            st_folium(fmap, width=700, height=500, returned_objects=[])
-        else:
-            st.warning("Install folium + streamlit-folium for map: pip install folium streamlit-folium")
+                for gf_name, gf_lat, gf_lon, gf_radius_mi in LAWSON_GEOFENCES:
+                    folium.Circle(
+                        [gf_lat, gf_lon],
+                        radius=int(gf_radius_mi * 1609),
+                        color="#5eead4",
+                        fill=True,
+                        fill_opacity=0.12,
+                        popup=gf_name,
+                    ).add_to(fmap)
+                for unit in map_fleet:
+                    if unit.get("latitude") is None:
+                        continue
+                    icon_color = (
+                        "orange"
+                        if using_sim or unit.get("status") == "simulation"
+                        else ("green" if unit.get("status") == "online" else "blue")
+                    )
+                    folium.Marker(
+                        [unit["latitude"], unit["longitude"]],
+                        popup=(
+                            f"{unit.get('device_name', 'Truck')} · "
+                            f"{float(unit.get('speed_mph') or 0):.0f} mph · "
+                            f"{unit.get('status', '?')}"
+                        ),
+                        icon=folium.Icon(color=icon_color, icon="truck", prefix="fa"),
+                    ).add_to(fmap)
+                st_folium(fmap, width=700, height=420, returned_objects=[])
+            else:
+                st.caption("Map unavailable — install folium and streamlit-folium.")
 
-    if fleet:
-        st.markdown("#### Fleet devices")
-        fleet_rows = [
-            {
-                "Name": f.get("device_name"),
-                "Status": f.get("status"),
-                "Lat": f.get("latitude"),
-                "Lon": f.get("longitude"),
-                "Speed mph": round(float(f.get("speed_mph") or 0), 1),
-            }
-            for f in fleet
-        ]
-        st.dataframe(pd.DataFrame(fleet_rows), use_container_width=True, hide_index=True)
+    # Fleet table only for real Traccar devices
+    if connected and fleet:
+        with st.expander(f"Fleet devices ({len(fleet)})", expanded=False):
+            fleet_rows = [
+                {
+                    "Name": f.get("device_name"),
+                    "Status": f.get("status"),
+                    "Lat": f.get("latitude"),
+                    "Lon": f.get("longitude"),
+                    "Speed mph": round(float(f.get("speed_mph") or 0), 1),
+                }
+                for f in fleet
+            ]
+            st.dataframe(
+                pd.DataFrame(fleet_rows), use_container_width=True, hide_index=True
+            )
 
-    st.divider()
-    st.markdown("#### 🚨 Emergency")
-    primary_fix = map_fleet[0] if map_fleet else None
-    _render_emergency_controls(
-        gps_fix=primary_fix if primary_fix and not using_sim else None,
-        key_prefix="gps_em",
-    )
-
-    st.info(
-        "Setup Traccar self-hosted or cloud for real device tracking. "
-        "Add server URL + API token above, or configure `[traccar]` in `.streamlit/secrets.toml`."
-    )
-
-    with st.expander("Traccar connection details"):
+    with st.expander("Emergency & setup", expanded=False):
+        primary_fix = map_fleet[0] if map_fleet and not using_sim else None
+        _render_emergency_controls(gps_fix=primary_fix, key_prefix="gps_em")
+        st.caption(
+            "Self-host or cloud Traccar · URL + token above, or `[traccar]` in secrets.toml."
+        )
         st.code(
             f"URL: {url}\n"
-            f"Auth: {'API token' if token else f'email {email}'}\n"
-            f"Devices: {len(devices)} · Live fixes: {len(live_units)}\n"
-            f"Version: {conn_status.get('version', '—')}",
+            f"Auth: {'API token' if token else f'email ({email})'}\n"
+            f"Mode: {mode} · Devices: {len(devices)} · Live fixes: {len(live_units)}\n"
+            f"Server version: {conn_status.get('version', '—')}",
             language="text",
         )
 

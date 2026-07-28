@@ -97,7 +97,14 @@ class TraccarLive:
             }
         except Exception as exc:
             log.info("Traccar connection failed: %s", exc)
-            return {"ok": False, "mode": "offline", "message": str(exc)}
+            # Keep message short for UI — no stack traces
+            err = type(exc).__name__
+            return {
+                "ok": False,
+                "mode": "offline",
+                "message": f"Unreachable ({err})",
+                "detail": str(exc)[:200],
+            }
 
     def fetch_devices(self) -> list[dict[str, Any]]:
         if not self.configured:
