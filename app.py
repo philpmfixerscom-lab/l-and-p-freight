@@ -39,11 +39,16 @@ except ImportError:
 
 try:
     import folium
-    from streamlit_folium import st_folium
 
     HAS_FOLIUM = True
 except ImportError:
     HAS_FOLIUM = False
+    folium = None  # type: ignore[assignment]
+
+try:
+    import streamlit.components.v1 as st_components
+except ImportError:
+    st_components = None  # type: ignore[assignment]
 
 log = logging.getLogger("lawson_freight")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -795,6 +800,20 @@ div[data-testid="stHorizontalBlock"] { gap: 0.7rem; }
 }
 .lf-gps-note.sim { color: #d6b45a; }
 .lf-gps-note.offline { color: #94a3b8; }
+/* GPS map: force full content width (kill half-page empty gap) */
+.lf-gps-map-wrap {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+}
+div[data-testid="stVerticalBlock"] > div:has(iframe[srcdoc]) {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+iframe[srcdoc] {
+    width: 100% !important;
+    max-width: 100% !important;
+}
 </style>
         """,
         unsafe_allow_html=True,
@@ -3820,6 +3839,113 @@ def _haversine_mi(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * asin(sqrt(a))
 
 
+def _render_full_width_folium_map(fmap: Any, *, height: int = 480) -> None:
+    """Render a Folium map at 100% of the main content width.
+
+    Avoid streamlit-folium here: its custom component often paints Leaflet at a
+    fixed width and leaves a large empty dark gap. Prefer st.iframe(width=
+    'stretch') with a local HTML file, falling back to components.html.
+    """
+    if not HAS_FOLIUM or folium is None:
+        st.caption("Map unavailable — install folium.")
+        return
+
+    # Force map geometry before render
+    for obj, w_attr, h_attr in (
+        (fmap, "width", "height"),
+        (fmap, "_width", "_height"),
+    ):
+        try:
+            setattr(obj, w_attr, "100%")
+            setattr(obj, h_attr, height)
+        except Exception:
+            pass
+
+    root = fmap.get_root()
+    try:
+        root.width = "100%"
+        root.height = height
+    except Exception:
+        pass
+
+    sizing_css = f"""
+<style>
+  html, body {{
+    width: 100% !important;
+    max-width: 100% !important;
+    height: {height}px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #0b1220 !important;
+  }}
+  .folium-map,
+  .leaflet-container,
+  .leaflet-pane,
+  .leaflet-map-pane,
+  .leaflet-tile-pane,
+  .leaflet-overlay-pane {{
+    width: 100% !important;
+    max-width: 100% !important;
+    height: {height}px !important;
+  }}
+</style>
+<script>
+  (function () {{
+    function fixSize() {{
+      try {{
+        document.querySelectorAll('.leaflet-container, .folium-map').forEach(function (el) {{
+          el.style.width = '100%';
+          el.style.maxWidth = '100%';
+          el.style.height = '{height}px';
+        }});
+        Object.keys(window).forEach(function (k) {{
+          try {{
+            var v = window[k];
+            if (v && typeof v.invalidateSize === 'function' && typeof v.eachLayer === 'function') {{
+              v.invalidateSize(true);
+            }}
+          }} catch (e) {{}}
+        }});
+      }} catch (e) {{}}
+    }}
+    if (document.readyState === 'complete') setTimeout(fixSize, 50);
+    else window.addEventListener('load', function () {{ setTimeout(fixSize, 50); }});
+    setTimeout(fixSize, 200);
+    setTimeout(fixSize, 600);
+  }})();
+</script>
+"""
+    try:
+        root.html.add_child(folium.Element(sizing_css))
+    except Exception:
+        pass
+
+    html = root.render()
+    st.markdown('<div class="lf-gps-map-wrap">', unsafe_allow_html=True)
+
+    # Prefer st.iframe stretch (Streamlit 1.5x+) so map matches position cards width
+    rendered = False
+    if hasattr(st, "iframe"):
+        try:
+            ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+            map_path = ATTACHMENTS_DIR / "gps_map_live.html"
+            map_path.write_text(html, encoding="utf-8")
+            st.iframe(map_path, width="stretch", height=height)
+            rendered = True
+        except Exception:
+            log.exception("st.iframe map render failed; falling back to components.html")
+
+    if not rendered:
+        if st_components is None:
+            st.caption("Map unavailable — streamlit.components not available.")
+        else:
+            # width=None → app default element width (full content column)
+            st_components.html(html, height=height, scrolling=False)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def render_gps_tracking_tab() -> None:
     """GPS tab: status badge → connection → positions → map (quiet errors)."""
     st.header("GPS")
@@ -4039,14 +4165,17 @@ def render_gps_tracking_tab() -> None:
                 hide_index=True,
             )
 
-    # ── Section 3: Map (only if position data exists) ─────────────────
+    # ── Section 3: Map (full content width — not in columns) ──────────
     if lat is not None and lon is not None and map_fleet:
         _gps_section_title("3 · Map")
-        if HAS_FOLIUM:
+        if HAS_FOLIUM and folium is not None:
+            map_height = 480
             fmap = folium.Map(
                 location=[lat, lon],
                 zoom_start=8,
                 tiles="CartoDB dark_matter",
+                width="100%",
+                height=map_height,
             )
             route_coords = [(p[0], p[1]) for p in SIM_ROUTE]
             folium.PolyLine(
@@ -4078,14 +4207,10 @@ def render_gps_tracking_tab() -> None:
                     ),
                     icon=folium.Icon(color=icon_color, icon="truck", prefix="fa"),
                 ).add_to(fmap)
-            st_folium(
-                fmap,
-                height=480,
-                use_container_width=True,
-                returned_objects=[],
-            )
+            # Full-width HTML embed (avoids streamlit-folium half-width gap)
+            _render_full_width_folium_map(fmap, height=map_height)
         else:
-            st.caption("Map unavailable — install folium and streamlit-folium.")
+            st.caption("Map unavailable — install folium.")
 
     with st.expander("Emergency", expanded=False):
         primary_fix = primary if primary and not using_sim else None
