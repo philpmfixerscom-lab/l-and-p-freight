@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/site.css">
+  <link rel="stylesheet" href="/css/site.css?v=3">
   <title>L &amp; P Freight — Paid miles north. Empty miles never.</title>
 </head>
 <body data-app-url="http://127.0.0.1:8502/">
@@ -29,8 +29,10 @@
         <img src="/static/icon-192.svg" alt="" width="40" height="40">
         L &amp; P <span>Freight</span>
       </a>
-      <a class="nav-cta nav-cta-driver" data-driver-link href="http://127.0.0.1:8502/?view=driver">Driver</a>
-      <a class="nav-cta" data-app-link href="http://127.0.0.1:8502/">Dispatch</a>
+      <div class="header-actions">
+        <a class="nav-cta" data-driver-link href="http://127.0.0.1:8502/?view=driver">Driver</a>
+        <a class="nav-cta" data-app-link href="http://127.0.0.1:8502/">Dispatch</a>
+      </div>
     </div>
   </header>
 
@@ -48,7 +50,7 @@
           </p>
           <div class="hero-actions">
             <a class="btn btn-primary" data-app-link href="http://127.0.0.1:8502/">Open Dispatch</a>
-            <a class="btn btn-secondary" data-driver-link href="http://127.0.0.1:8502/?view=driver">Open Driver</a>
+            <a class="btn btn-primary" data-driver-link href="http://127.0.0.1:8502/?view=driver">Open Driver</a>
             <button class="btn btn-secondary" id="install-pwa" type="button" hidden>Install Dispatch</button>
             <button class="btn btn-secondary" id="install-driver-pwa" type="button" hidden>Install Driver</button>
           </div>
@@ -183,7 +185,7 @@
   </footer>
 
   <div class="mobile-cta-bar">
-    <a class="btn btn-secondary" data-driver-link href="http://127.0.0.1:8502/?view=driver">Driver</a>
+    <a class="btn btn-primary" data-driver-link href="http://127.0.0.1:8502/?view=driver">Driver</a>
     <a class="btn btn-primary" data-app-link href="http://127.0.0.1:8502/">Dispatch</a>
   </div>
 

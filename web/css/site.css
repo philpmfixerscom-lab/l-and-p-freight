@@ -60,6 +60,13 @@ a:hover { text-decoration: underline; }
   gap: 1rem;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -146,14 +153,27 @@ a:hover { text-decoration: underline; }
   transition: transform 0.1s, opacity 0.1s;
 }
 
-.btn-primary {
-  background: var(--orange);
-  color: #fff;
+.btn-primary,
+a.btn-primary {
+  background: var(--orange) !important;
+  color: #fff !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  border: none;
 }
 
-.btn-primary:hover { background: var(--orange-hover); }
+.btn-primary:hover,
+a.btn-primary:hover { background: var(--orange-hover) !important; }
 
+/* Ghost style only works on dark hero; keep readable elsewhere */
 .btn-secondary {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.hero .btn-secondary {
   background: rgba(255,255,255,0.1);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.2);
@@ -300,11 +320,23 @@ section:nth-of-type(even) {
 .fleet-card h3 { margin-top: 0; }
 .fleet-card-driver { border-left: 4px solid #f97316; }
 
-.nav-cta-driver {
-  background: transparent !important;
-  border: 1px solid rgba(251, 146, 60, 0.5) !important;
-  color: #fb923c !important;
-  margin-right: 0.5rem;
+/* Fleet CTAs: solid orange, full-width, never muted */
+.fleet-card .btn,
+.fleet-card a.btn {
+  display: inline-flex;
+  width: 100%;
+  margin-top: 0.75rem;
+  background: var(--orange) !important;
+  color: #fff !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  border: none;
+}
+
+.fleet-card .btn:hover,
+.fleet-card a.btn:hover {
+  background: var(--orange-hover) !important;
 }
 
 /* Footer */

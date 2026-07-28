@@ -1,5 +1,5 @@
 /* L & P Freight — service worker for marketing site + PWA offline shell */
-const CACHE = "lp-freight-v2";
+const CACHE = "lp-freight-v3";
 const SHELL = ["/", "/index.html", "/manifest.json", "/manifest-driver.json"];
 
 self.addEventListener("install", (event) => {
