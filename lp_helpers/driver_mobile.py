@@ -13,8 +13,9 @@ CABIN_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
 :root {
     --cabin-bg: #0b0f14; --cabin-card: #141a22; --cabin-text: #f1f5f9;
-    --cabin-muted: #94a3b8; --cabin-border: #2a3545; --cabin-orange: #f97316;
-    --cabin-danger: #ef4444; --cabin-green: #22c55e;
+    --cabin-muted: #94a3b8; --cabin-border: #3d4b5f; --cabin-orange: #f97316;
+    --cabin-orange-soft: rgba(249, 115, 22, 0.12);
+    --cabin-danger: #ef4444; --cabin-green: #22c55e; --cabin-blue: #38bdf8;
 }
 html, body, [class*="css"] {
     font-family: 'Inter', system-ui, sans-serif !important;
@@ -23,41 +24,108 @@ html, body, [class*="css"] {
 }
 #MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
 .block-container { padding: 0.75rem 1rem 5.5rem !important; max-width: 480px !important; }
+
+/* ── Buttons: outline-first cabin chrome (orange is accent, not flood fill) ── */
 .stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button,
 .stLinkButton > a,
 div[data-testid="stLinkButton"] > a {
-    min-height: 56px !important; font-weight: 700 !important; font-size: 1.05rem !important;
-    border-radius: 14px !important; background: var(--cabin-orange) !important; color: #fff !important;
-    border: 2px solid #fb923c !important;
+    min-height: 56px !important;
+    font-weight: 700 !important;
+    font-size: 1.02rem !important;
+    border-radius: 14px !important;
+    background: transparent !important;
+    color: var(--cabin-text) !important;
+    border: 2px solid var(--cabin-border) !important;
+    box-shadow: none !important;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-/* Secondary outline actions */
-.stButton > button[kind="secondary"] {
-    background: #1e2937 !important; color: #f1f5f9 !important;
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+.stFormSubmitButton > button:hover,
+.stLinkButton > a:hover,
+div[data-testid="stLinkButton"] > a:hover {
+    background: rgba(255,255,255,0.04) !important;
+    border-color: #64748b !important;
+}
+.stButton > button:active,
+.stLinkButton > a:active {
+    transform: scale(0.98);
+}
+/* Primary = orange outline + soft tint (not solid fill) */
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"],
+.stDownloadButton > button[kind="primary"] {
+    background: var(--cabin-orange-soft) !important;
+    color: #fdba74 !important;
+    border: 2px solid var(--cabin-orange) !important;
+}
+.stButton > button[kind="primary"]:hover,
+.stFormSubmitButton > button[kind="primary"]:hover {
+    background: rgba(249, 115, 22, 0.2) !important;
+    color: #fed7aa !important;
+}
+/* Secondary = neutral outline */
+.stButton > button[kind="secondary"],
+.stFormSubmitButton > button[kind="secondary"] {
+    background: transparent !important;
+    color: var(--cabin-text) !important;
     border: 2px solid var(--cabin-border) !important;
 }
+/* Map / dial link buttons — blue outline (nav) so orange is not everywhere */
+.stLinkButton > a,
+div[data-testid="stLinkButton"] > a {
+    background: rgba(56, 189, 248, 0.08) !important;
+    color: #7dd3fc !important;
+    border: 2px solid rgba(56, 189, 248, 0.55) !important;
+}
+.stLinkButton > a:hover,
+div[data-testid="stLinkButton"] > a:hover {
+    background: rgba(56, 189, 248, 0.16) !important;
+    border-color: var(--cabin-blue) !important;
+    color: #e0f2fe !important;
+}
+.stButton > button:disabled {
+    opacity: 0.45 !important;
+    border-style: dashed !important;
+}
+
 .cabin-card {
     background: var(--cabin-card); border: 1px solid var(--cabin-border);
     border-radius: 16px; padding: 1rem; margin-bottom: 0.75rem;
 }
 .cabin-next {
-    background: rgba(249, 115, 22, 0.12); border: 1px solid var(--cabin-orange);
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid var(--cabin-border);
+    border-left: 4px solid var(--cabin-orange);
     border-radius: 14px; padding: 0.85rem 1rem; margin-bottom: 0.75rem;
-    font-weight: 700; font-size: 1.05rem;
+    font-weight: 600; font-size: 1.02rem; color: var(--cabin-text);
+}
+.cabin-nav-card {
+    background: rgba(20, 26, 34, 0.98);
+    border: 1px solid var(--cabin-border);
+    border-left: 4px solid var(--cabin-blue);
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 0.75rem;
 }
 .pill { display:inline-block; padding:0.45rem 0.95rem; border-radius:999px;
-    font-size:0.9rem; font-weight:700; }
-.pill-blue { background:rgba(59,130,246,0.25); color:#93c5fd; }
-.pill-green { background:rgba(34,197,94,0.25); color:#4ade80; }
-.pill-amber { background:rgba(251,191,36,0.25); color:#fbbf24; }
+    font-size:0.9rem; font-weight:700; border: 1px solid transparent; }
+.pill-blue { background:rgba(59,130,246,0.18); color:#93c5fd; border-color:rgba(59,130,246,0.35); }
+.pill-green { background:rgba(34,197,94,0.18); color:#4ade80; border-color:rgba(34,197,94,0.35); }
+.pill-amber { background:rgba(251,191,36,0.18); color:#fbbf24; border-color:rgba(251,191,36,0.35); }
 .stTextInput input, .stTextArea textarea, .stSelectbox > div > div {
     min-height: 48px !important; font-size: 1.05rem !important;
     color: #f1f5f9 !important; background: #1e2937 !important;
     -webkit-text-fill-color: #f1f5f9 !important;
+    border: 1px solid var(--cabin-border) !important;
 }
 /* Bin estimate radios — large cabin touch targets */
 div[role="radiogroup"] label {
     min-height: 48px !important; padding: 0.55rem 0.65rem !important;
     font-size: 1.02rem !important; margin-bottom: 0.35rem !important;
+    border: 1px solid var(--cabin-border) !important; border-radius: 10px !important;
 }
 div[data-testid="stNumberInput"] input {
     min-height: 48px !important; font-size: 1.1rem !important;
@@ -72,19 +140,67 @@ CABIN_CSS_DAY = """
 <style>
 :root {
     --cabin-bg: #f1f5f9; --cabin-card: #ffffff; --cabin-text: #0f172a;
-    --cabin-muted: #475569; --cabin-border: #cbd5e1; --cabin-orange: #ea580c;
-    --cabin-danger: #dc2626; --cabin-green: #16a34a;
+    --cabin-muted: #475569; --cabin-border: #94a3b8; --cabin-orange: #ea580c;
+    --cabin-orange-soft: rgba(234, 88, 12, 0.08);
+    --cabin-danger: #dc2626; --cabin-green: #16a34a; --cabin-blue: #0284c7;
 }
 html, body, [class*="css"] {
     background: var(--cabin-bg) !important; color: var(--cabin-text) !important;
 }
 .cabin-card { background: var(--cabin-card); border-color: var(--cabin-border); }
+.cabin-next {
+    background: #fff;
+    border: 1px solid var(--cabin-border);
+    border-left: 4px solid var(--cabin-orange);
+    color: var(--cabin-text);
+}
+.cabin-nav-card {
+    background: #fff;
+    border: 1px solid var(--cabin-border);
+    border-left: 4px solid var(--cabin-blue);
+}
+.stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button,
+.stLinkButton > a,
+div[data-testid="stLinkButton"] > a {
+    background: #fff !important;
+    color: var(--cabin-text) !important;
+    border: 2px solid var(--cabin-border) !important;
+}
+.stButton > button:hover,
+.stLinkButton > a:hover,
+div[data-testid="stLinkButton"] > a:hover {
+    background: #f8fafc !important;
+    border-color: #64748b !important;
+}
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"] {
+    background: var(--cabin-orange-soft) !important;
+    color: #c2410c !important;
+    border: 2px solid var(--cabin-orange) !important;
+}
+.stButton > button[kind="secondary"] {
+    background: #fff !important;
+    color: var(--cabin-text) !important;
+    border: 2px solid var(--cabin-border) !important;
+}
+.stLinkButton > a,
+div[data-testid="stLinkButton"] > a {
+    background: rgba(2, 132, 199, 0.06) !important;
+    color: #0369a1 !important;
+    border: 2px solid rgba(2, 132, 199, 0.45) !important;
+}
 .stTextInput input, .stTextArea textarea, .stSelectbox > div > div {
     color: #0f172a !important; background: #f8fafc !important;
     -webkit-text-fill-color: #0f172a !important;
+    border: 1px solid var(--cabin-border) !important;
 }
 div[data-testid="stMetric"] [data-testid="stMetricValue"] {
     color: #0c4a6e !important;
+}
+div[role="radiogroup"] label {
+    border: 1px solid var(--cabin-border) !important; border-radius: 10px !important;
 }
 </style>
 """
@@ -141,18 +257,19 @@ def get_navigation_links(
 
 
 def _render_nav_link_button(label: str, url: str) -> None:
-    """Prefer st.link_button; markdown fallback for older Streamlit."""
+    """Prefer st.link_button; outlined markdown fallback for older Streamlit."""
     if hasattr(st, "link_button"):
         st.link_button(label, url, use_container_width=True)
         return
     st.markdown(
         f"""
         <a href="{url}" target="_blank" rel="noopener noreferrer" style="
-            display:block; text-align:center; text-decoration:none;
-            background: linear-gradient(90deg, #ea580c, #f97316);
-            color:#fff; border-radius:14px; padding:0.95rem 0.75rem;
+            display:flex; align-items:center; justify-content:center; text-align:center;
+            text-decoration:none; background: rgba(56, 189, 248, 0.08);
+            color:#7dd3fc; border:2px solid rgba(56, 189, 248, 0.55);
+            border-radius:14px; padding:0.95rem 0.75rem;
             margin-bottom:0.4rem; font-weight:700; font-size:1.05rem;
-            min-height:56px; box-shadow:0 4px 14px rgba(249,115,22,0.4);
+            min-height:56px; box-sizing:border-box;
         ">{label}</a>
         """,
         unsafe_allow_html=True,
@@ -170,23 +287,16 @@ def render_primary_navigation_card(
     st.markdown("#### 🗺️ Navigation")
     st.markdown(
         f"""
-<div style="
-    background: rgba(20, 26, 34, 0.98);
-    border: 1px solid #2a3545;
-    border-left: 5px solid #f97316;
-    border-radius: 14px;
-    padding: 1rem 1.1rem;
-    margin-bottom: 0.75rem;
-">
-    <div style="font-size: 0.75rem; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 0.2rem;">ORIGIN</div>
-    <div style="font-size: 1.1rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.75rem;">
+<div class="cabin-nav-card">
+    <div style="font-size: 0.75rem; color: var(--cabin-muted); letter-spacing: 0.5px; margin-bottom: 0.2rem;">ORIGIN</div>
+    <div style="font-size: 1.1rem; font-weight: 700; color: var(--cabin-text); margin-bottom: 0.75rem;">
         {origin_label}
     </div>
-    <div style="font-size: 0.75rem; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 0.2rem;">DESTINATION</div>
-    <div style="font-size: 1.1rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.55rem;">
+    <div style="font-size: 0.75rem; color: var(--cabin-muted); letter-spacing: 0.5px; margin-bottom: 0.2rem;">DESTINATION</div>
+    <div style="font-size: 1.1rem; font-weight: 700; color: var(--cabin-text); margin-bottom: 0.55rem;">
         {destination_label}
     </div>
-    <div style="font-size: 0.8rem; color: #67e8f9;">
+    <div style="font-size: 0.8rem; color: var(--cabin-blue);">
         Lane: Spruce Pine NC → Central GA · ~275 miles · Ready for navigation
     </div>
 </div>
@@ -245,6 +355,18 @@ def _next_action_blurb(status: str, load: dict[str, Any]) -> str:
     if s == "delivered":
         return "Next: find a return home — open Dispatch deadhead panel."
     return f"Status: {status} · stay safe"
+
+
+def _next_status_key(status: str) -> str | None:
+    """Which STATUS_ACTIONS key is the next step (gets orange outline only)."""
+    s = status.lower()
+    if s in ("available", "—", "", "booked", "quoted", "potential", "dispatched"):
+        return "driver_act_onsite"
+    if s in ("arrived", "on site"):
+        return "driver_act_rolling"
+    if s in ("loaded", "in transit"):
+        return "driver_act_delivered"
+    return None
 
 
 def _pill_class(status: str) -> str:
@@ -330,7 +452,12 @@ def render_driver_app(
         st.markdown("## L & P Driver")
         st.caption(f"{owner} · {truck_label} · Cab mode")
     with top2:
-        if st.button("Exit", use_container_width=True, key="driver_exit_btn"):
+        if st.button(
+            "Exit",
+            use_container_width=True,
+            type="secondary",
+            key="driver_exit_btn",
+        ):
             if on_exit:
                 on_exit()
             st.rerun()
@@ -364,7 +491,7 @@ def render_driver_app(
     if st.button(
         bin_btn_label,
         use_container_width=True,
-        type="primary",
+        type="secondary",
         key="driver_bin_est_btn",
     ):
         st.session_state.driver_show_bin_est = not show_bin
@@ -397,14 +524,16 @@ def render_driver_app(
     c1.metric("Miles", f"{_safe_float(load.get('loaded_miles'), 285):.0f} ld")
     c2.metric("Rate", f"${_safe_float(load.get('rate_per_ton')):.2f}/t")
 
-    # Primary status actions — full width stack
+    # Status actions — outlined stack; only the next step is orange-outline primary
     st.markdown("#### Status")
+    next_key = _next_status_key(status)
     for label, new_status, key in STATUS_ACTIONS:
         is_current = status.lower() == new_status.lower()
+        is_next = key == next_key
         if st.button(
             f"{'✓ ' if is_current else ''}{label}",
             use_container_width=True,
-            type="primary" if not is_current else "secondary",
+            type="primary" if is_next and not is_current else "secondary",
             key=key,
             disabled=is_current and bool(load_id),
         ):
@@ -429,7 +558,12 @@ def render_driver_app(
             placeholder="Scale ticket, gate time, delay…",
             key="driver_note_text",
         )
-        if st.button("Save note", use_container_width=True, key="driver_save_note"):
+        if st.button(
+            "Save note",
+            use_container_width=True,
+            type="secondary",
+            key="driver_save_note",
+        ):
             if load_id and note.strip():
                 ok, msg = _update_load_status(
                     get_connection, load_id, status, owner, note=note.strip()
@@ -472,7 +606,12 @@ def render_driver_app(
             },
         )
         st.text_area("Arrival SMS", arrival_msg, height=120, key="driver_arrival_preview")
-        if st.button("Log Arrival Alert", use_container_width=True, key="driver_arrival_log"):
+        if st.button(
+            "Log Arrival Alert",
+            use_container_width=True,
+            type="secondary",
+            key="driver_arrival_log",
+        ):
             log_sms_event(None, "driver_arrival", arrival_msg, "driver_app")
             st.success("Arrival logged — send from dispatch Alerts tab.")
 
@@ -553,7 +692,12 @@ def _render_bin_estimate(
             st.info(
                 "Days of supply not available — set avg weekly tons on the lead in Dispatch first."
             )
-        if st.button("Log another estimate", use_container_width=True, key="bin_est_another"):
+        if st.button(
+            "Log another estimate",
+            use_container_width=True,
+            type="secondary",
+            key="bin_est_another",
+        ):
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
         return

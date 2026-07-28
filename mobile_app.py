@@ -115,29 +115,48 @@ div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
     color: var(--cabin-text) !important;
 }
 
+/* Outline-first cabin buttons — orange as accent border, not solid flood */
 .stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button,
 .stLinkButton > a,
 div[data-testid="stLinkButton"] > a {
     min-height: var(--cabin-touch) !important;
     font-size: 1rem !important;
     font-weight: 700 !important;
     border-radius: 14px !important;
-    border: none !important;
-    background: var(--cabin-orange) !important;
-    color: white !important;
+    border: 2px solid var(--cabin-border) !important;
+    background: transparent !important;
+    color: var(--cabin-text) !important;
     padding: 0 1.25rem !important;
-    box-shadow: 0 4px 0 #c2410c;
-    transition: transform 0.1s, box-shadow 0.1s;
+    box-shadow: none !important;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.stButton > button:hover,
+.stLinkButton > a:hover,
+div[data-testid="stLinkButton"] > a:hover {
+    background: rgba(255,255,255,0.04) !important;
+    border-color: #64748b !important;
 }
 .stButton > button:active {
-    transform: translateY(2px);
-    box-shadow: 0 1px 0 #c2410c;
+    transform: scale(0.98);
+}
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"] {
+    background: rgba(249, 115, 22, 0.12) !important;
+    color: #fdba74 !important;
+    border: 2px solid var(--cabin-orange) !important;
 }
 .stButton > button[kind="secondary"] {
-    background: var(--cabin-card-2) !important;
+    background: transparent !important;
     color: var(--cabin-text) !important;
-    border: 1px solid var(--cabin-border) !important;
-    box-shadow: none;
+    border: 2px solid var(--cabin-border) !important;
+}
+.stLinkButton > a,
+div[data-testid="stLinkButton"] > a {
+    background: rgba(56, 189, 248, 0.08) !important;
+    color: #7dd3fc !important;
+    border: 2px solid rgba(56, 189, 248, 0.55) !important;
 }
 
 .stTextInput input, .stNumberInput input, .stTextArea textarea,
@@ -381,7 +400,7 @@ def render_driver_navigation_card(
 <div style="
     background: var(--cabin-card);
     border: 1px solid var(--cabin-border);
-    border-left: 5px solid var(--cabin-orange);
+    border-left: 4px solid var(--cabin-blue);
     border-radius: 14px;
     padding: 1rem 1.1rem;
     margin-bottom: 0.75rem;
@@ -394,7 +413,7 @@ def render_driver_navigation_card(
     <div style="font-size: 1.1rem; font-weight: 700; color: var(--cabin-text); margin-bottom: 0.55rem;">
         Central Georgia – Kohler area / as directed
     </div>
-    <div style="font-size: 0.8rem; color: #67e8f9;">
+    <div style="font-size: 0.8rem; color: var(--cabin-blue);">
         Lane: Spruce Pine NC → Central GA · ~275 miles · Ready for navigation
     </div>
 </div>
@@ -409,8 +428,9 @@ def render_driver_navigation_card(
         else:
             st.markdown(
                 f'<a href="{google_url}" target="_blank" rel="noopener noreferrer" '
-                f'style="display:block;text-align:center;text-decoration:none;background:var(--cabin-orange);'
-                f'color:#fff;border-radius:14px;padding:0.95rem;font-weight:700;">🗺️ Open in Google Maps</a>',
+                f'style="display:flex;align-items:center;justify-content:center;text-decoration:none;'
+                f'background:rgba(56,189,248,0.08);color:#7dd3fc;border:2px solid rgba(56,189,248,0.55);'
+                f'border-radius:14px;padding:0.95rem;font-weight:700;min-height:52px;">🗺️ Open in Google Maps</a>',
                 unsafe_allow_html=True,
             )
     with b2:
@@ -419,8 +439,9 @@ def render_driver_navigation_card(
         else:
             st.markdown(
                 f'<a href="{apple_url}" target="_blank" rel="noopener noreferrer" '
-                f'style="display:block;text-align:center;text-decoration:none;background:var(--cabin-orange);'
-                f'color:#fff;border-radius:14px;padding:0.95rem;font-weight:700;">🍎 Open in Apple Maps</a>',
+                f'style="display:flex;align-items:center;justify-content:center;text-decoration:none;'
+                f'background:rgba(56,189,248,0.08);color:#7dd3fc;border:2px solid rgba(56,189,248,0.55);'
+                f'border-radius:14px;padding:0.95rem;font-weight:700;min-height:52px;">🍎 Open in Apple Maps</a>',
                 unsafe_allow_html=True,
             )
 
