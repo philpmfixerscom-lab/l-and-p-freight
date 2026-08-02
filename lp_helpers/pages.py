@@ -1,4 +1,9 @@
-"""All page render functions for L & P Dispatch v3.0 Freight OS Streamlit app."""
+"""LEGACY / NOT ROUTED from app.py — do not import for production UI.
+
+Historical page-render module retained for reference and tests only.
+The live Streamlit shell is `app.py` (tabs, sidebar, driver view).
+Do not wire these render_* functions into production navigation.
+"""
 
 from __future__ import annotations
 

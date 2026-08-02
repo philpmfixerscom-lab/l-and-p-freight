@@ -11,7 +11,7 @@ import shutil
 import sqlite3
 import uuid
 from contextlib import closing
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -503,6 +503,50 @@ def log_sms_event(
         conn.commit()
 
 
+def twilio_configured() -> bool:
+    return all(
+        [
+            get_secret("twilio", "account_sid"),
+            get_secret("twilio", "auth_token"),
+            get_secret("twilio", "from_number"),
+        ]
+    )
+
+
+def try_send_sms(
+    to: str,
+    body: str,
+    alert_type: str,
+    lead_id: int | None = None,
+) -> tuple[bool, str]:
+    """Send via Twilio when configured; otherwise log as clipboard/log-only.
+
+    Returns (ok, detail_message). Always logs an sms_log row.
+    Exception details go to the app logger only — not into sms_log body or UI.
+    """
+    to_num = normalize_phone(str(to or "").split("|")[0].strip()) if to else ""
+    if not to_num:
+        msg = "No phone number — message not sent"
+        log_sms_event(lead_id, alert_type, body, "error", None)
+        return False, msg
+
+    if twilio_configured():
+        try:
+            sid = send_twilio_notification(to_num, body)
+            log_sms_event(lead_id, alert_type, body, "twilio", sid)
+            return True, f"Sent via Twilio · SID {sid}"
+        except Exception as exc:
+            log.exception("Twilio send failed for alert_type=%s", alert_type)
+            log_sms_event(lead_id, alert_type, body, "error", None)
+            return False, "Twilio send failed — check credentials / number (see logs)"
+
+    log_sms_event(lead_id, alert_type, body, "clipboard", None)
+    return (
+        False,
+        "Twilio not configured — message logged only",
+    )
+
+
 def dispatch_emergency(
     emergency_key: str,
     message: str,
@@ -568,38 +612,38 @@ def _render_emergency_controls(
     )
 
 
-def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> None:
+def maybe_auto_notify_load(load: dict[str, Any], lead_phone: str | None) -> tuple[bool, str] | None:
+    """Auto-notify shipper on Dispatched/In Transit. Surfaces result via return value."""
     if get_secret("twilio", "auto_send", "0") != "1" and st.session_state.get("sms_auto_send") != "1":
-        return
+        return None
     if not lead_phone:
-        return
+        return None
     status = str(load.get("status", ""))
     if status not in ("Dispatched", "In Transit"):
-        return
+        return None
     body = format_sms("status_dispatched", load)
-    try:
-        tw_sid = send_twilio_notification(lead_phone, body)
-        log_sms_event(None, "status_dispatched", body, "twilio", tw_sid)
-    except Exception as exc:
-        log.warning("Auto SMS skipped: %s", exc)
+    ok, detail = try_send_sms(lead_phone, body, "status_dispatched", lead_id=None)
+    if not ok and "not configured" not in detail.lower() and "No phone" not in detail:
+        log.warning("Auto SMS: %s", detail)
+    return ok, detail
 
 
-def notify_dispatcher_new_load(load: dict[str, Any]) -> None:
+def notify_dispatcher_new_load(load: dict[str, Any]) -> tuple[bool, str] | None:
+    """Auto SMS dispatcher on new load. Returns try_send_sms result when attempted."""
     auto_on = (
         st.session_state.get("sms_auto_new_load", "1") == "1"
         or get_secret("twilio", "auto_send_new_load", "1") == "1"
     )
     if not auto_on:
-        return
-    dispatch_phone = get_secret("twilio", "dispatch_phone", "+18284678218")
+        return None
+    dispatch_phone = get_secret("twilio", "dispatch_phone", "")
     if not dispatch_phone.strip():
-        return
+        return None
     body = format_sms("new_load_logged", load)
-    try:
-        tw_sid = send_twilio_notification(dispatch_phone, body)
-        log_sms_event(None, "new_load_logged", body, "twilio", tw_sid)
-    except Exception as exc:
-        log.warning("Dispatcher new-load SMS skipped: %s", exc)
+    ok, detail = try_send_sms(dispatch_phone, body, "new_load_logged", lead_id=None)
+    if not ok:
+        log.warning("Dispatcher new-load SMS: %s", detail)
+    return ok, detail
 
 
 def _traccar_connection_params() -> tuple[str, str, str, str]:
@@ -1095,20 +1139,30 @@ def validate_bol_load(load: dict[str, Any]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Auto-backup
+# Auto-backup (retention + restore via lp_helpers.backup)
 # ---------------------------------------------------------------------------
 
-def auto_backup_db() -> None:
+def auto_backup_db(*, force: bool = False) -> Path | None:
+    """Backup when DB changed or last backup older than 6h; keep max 14 files."""
     try:
-        if not DB_PATH.exists():
-            return
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = BACKUP_DIR / f"lp_dispatch_{stamp}.db"
-        shutil.copy2(DB_PATH, dest)
-        log.info("Auto-backup created: %s", dest)
+        from lp_helpers.backup import auto_backup_db as _auto
+
+        return _auto(DB_PATH, BACKUP_DIR, force=force)
     except Exception as exc:
         log.warning("Auto-backup skipped: %s", exc)
+        return None
+
+
+def list_backups() -> list[Path]:
+    from lp_helpers.backup import list_backups as _list
+
+    return _list(BACKUP_DIR)
+
+
+def restore_backup(path: Path) -> Path:
+    from lp_helpers.backup import restore_backup as _restore
+
+    return _restore(Path(path), DB_PATH, BACKUP_DIR)
 
 
 # ---------------------------------------------------------------------------
@@ -1230,6 +1284,8 @@ def init_database() -> None:
         ("last_estimate_date", "TEXT"),
         ("last_estimate_tons", "REAL"),
         ("days_of_supply_est", "REAL"),
+        ("next_followup_at", "TEXT"),
+        ("followup_notes", "TEXT"),
     ):
         if col not in lead_cols:
             cursor.execute(f"ALTER TABLE leads ADD COLUMN {col} {coltype}")
@@ -1796,9 +1852,13 @@ def apply_load_prefill(prefill: dict) -> None:
 
 def prefill_load_logger(**kwargs) -> None:
     """Queue a durable prefill until Logger applies it (survives wrong-tab navigation)."""
+    flash = kwargs.pop("nav_hint", None)
     st.session_state.load_prefill = kwargs
     st.session_state["_load_prefill_pending"] = True
-    navigate_to_tab("Logger")
+    # navigate_to_tab sets a default nav_hint — override after if flash provided
+    st.session_state.active_tab = "Logger"
+    st.session_state.nav_hint = flash or "Opened **Logger**"
+    st.rerun()
 
 
 def match_lane_rates(
@@ -1900,8 +1960,110 @@ def render_lawson_sidebar_extras() -> None:
         st.session_state["owner_role"] = DEFAULT_OWNER
 
 
+AUTH_FAIL_MAX = 8
+AUTH_FAIL_COOLDOWN_SEC = 300  # 5 minutes
+
+
+def _clear_auth_session() -> None:
+    """Logout: clear auth and sensitive session keys; re-seed safe defaults."""
+    sensitive = (
+        "authenticated",
+        "auth_display_name",
+        "auth_username_input",
+        "auth_password_input",
+        "auth_fail_count",
+        "auth_fail_until",
+        "bol_pdf_bytes",
+        "settlement_pdf",
+        "settlement_pdf_name",
+        "logger_save_flash",
+        "load_prefill",
+        "_load_prefill_pending",
+    )
+    for k in sensitive:
+        st.session_state.pop(k, None)
+    st.session_state["authenticated"] = False
+    st.session_state.setdefault("user_role", "owner_driver")
+    st.session_state.setdefault("tenant_id", "lp-freight")
+    st.session_state.setdefault("active_tab", "Dashboard")
+
+
+def _auth_cooldown_remaining() -> int:
+    """Seconds left on auth lockout; 0 if not locked or cooldown expired (and resets)."""
+    import time as _time
+
+    until = st.session_state.get("auth_fail_until")
+    if until is None:
+        return 0
+    try:
+        until_f = float(until)
+    except (TypeError, ValueError):
+        st.session_state.pop("auth_fail_until", None)
+        st.session_state["auth_fail_count"] = 0
+        return 0
+    now = _time.time()
+    if now >= until_f:
+        st.session_state.pop("auth_fail_until", None)
+        st.session_state["auth_fail_count"] = 0
+        return 0
+    return max(0, int(until_f - now) + 1)
+
+
+def _render_auth_login_gate(expected_password: str) -> None:
+    """Blocking password form when LP_APP_PASSWORD / auth.password is set.
+
+    Always st.stop() — never fall through into the main app.
+    After AUTH_FAIL_MAX failures, time-based cooldown (AUTH_FAIL_COOLDOWN_SEC).
+    """
+    import time as _time
+
+    st.title(f"🚛 {PLATFORM_TITLE}")
+    st.caption("Sign in to continue · solo O/O dispatch")
+
+    remaining = _auth_cooldown_remaining()
+    if remaining > 0:
+        mins, secs = divmod(remaining, 60)
+        st.error(
+            f"Too many failed attempts. Try again in **{mins}m {secs:02d}s** "
+            f"({remaining}s remaining)."
+        )
+        st.stop()
+
+    fails = int(st.session_state.get("auth_fail_count") or 0)
+    with st.form("lp_auth_login_form"):
+        st.text_input("Username (optional)", key="auth_username_input", placeholder="Phillip")
+        pw = st.text_input("Password", type="password", key="auth_password_input")
+        submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
+    if submitted:
+        from lp_helpers.auth_gate import verify_password
+
+        if verify_password(pw or "", expected_password):
+            st.session_state["authenticated"] = True
+            st.session_state["auth_fail_count"] = 0
+            st.session_state.pop("auth_fail_until", None)
+            uname = (st.session_state.get("auth_username_input") or "").strip()
+            if uname:
+                st.session_state["auth_display_name"] = uname
+            st.session_state.setdefault("user_role", "owner_driver")
+            st.rerun()
+        else:
+            fails = fails + 1
+            st.session_state["auth_fail_count"] = fails
+            if fails >= AUTH_FAIL_MAX:
+                st.session_state["auth_fail_until"] = _time.time() + AUTH_FAIL_COOLDOWN_SEC
+                remaining = int(AUTH_FAIL_COOLDOWN_SEC)
+                mins, secs = divmod(remaining, 60)
+                st.error(
+                    f"Too many failed attempts. Locked for **{mins}m {secs:02d}s**."
+                )
+            else:
+                left = AUTH_FAIL_MAX - fails
+                st.error(f"Incorrect password. ({left} attempt(s) left before cooldown)")
+    st.stop()
+
+
 def render_sidebar() -> None:
-    """Combined sidebar with safe owner selector, theme toggle, and Driver View."""
+    """Combined sidebar with safe owner selector, theme toggle, backups, and Driver View."""
     with st.sidebar:
         st.markdown(f"### {CARRIER_NAME}")
         st.caption(
@@ -1928,6 +2090,13 @@ def render_sidebar() -> None:
             st.error(f"Owner selector error: {e}")
             st.session_state["owner_role"] = DEFAULT_OWNER
 
+        if st.session_state.get("authenticated"):
+            uname = st.session_state.get("auth_display_name") or get_active_owner()
+            st.caption(f"Signed in as **{uname}**")
+            if st.button("Logout", use_container_width=True, key="sidebar_logout_btn"):
+                _clear_auth_session()
+                st.rerun()
+
         st.divider()
 
         # Day / Night Toggle
@@ -1936,6 +2105,52 @@ def render_sidebar() -> None:
         except ImportError:
             _day_night = render_day_night_toggle
         _day_night()
+
+        st.divider()
+
+        # --- Backups (Settings) ---
+        with st.expander("Backups", expanded=False):
+            try:
+                backups = list_backups()
+                if backups:
+                    latest = backups[0]
+                    age_h = (datetime.now() - datetime.fromtimestamp(latest.stat().st_mtime)).total_seconds() / 3600
+                    st.caption(
+                        f"**{len(backups)}** kept · newest `{latest.name}` "
+                        f"({age_h:.1f}h ago)"
+                    )
+                else:
+                    st.caption("No backups yet.")
+                if st.button("Create backup now", use_container_width=True, key="sidebar_backup_now"):
+                    dest = auto_backup_db(force=True)
+                    if dest:
+                        st.success(f"Saved `{dest.name}`")
+                        st.rerun()
+                    else:
+                        st.warning("Backup skipped — DB missing or error.")
+                if backups:
+                    labels = [p.name for p in backups[:14]]
+                    pick = st.selectbox("Restore from", labels, key="sidebar_backup_pick")
+                    confirm = st.checkbox(
+                        "I understand this overwrites the live DB",
+                        key="sidebar_backup_confirm",
+                    )
+                    if st.button(
+                        "Restore",
+                        use_container_width=True,
+                        key="sidebar_backup_restore",
+                        disabled=not confirm,
+                    ):
+                        chosen = next((p for p in backups if p.name == pick), None)
+                        if chosen:
+                            safety = restore_backup(chosen)
+                            clear_data_caches()
+                            st.success(
+                                f"Restored `{pick}`. Safety copy: `{Path(safety).name}`"
+                            )
+                            st.rerun()
+            except Exception as exc:
+                st.caption(f"Backup panel unavailable: {exc}")
 
         st.divider()
 
@@ -1975,6 +2190,48 @@ def render_target_lane_banner() -> None:
         )
 
 
+def _quote_sms_context_from_candidate(
+    *,
+    company: str,
+    commodity: str,
+    origin: str,
+    destination: str,
+    rate: Any,
+    weight_tons: float = 24.0,
+) -> dict[str, Any]:
+    rate_num = 0.0
+    if rate is not None:
+        try:
+            from lp_helpers.deadhead import _parse_rate
+
+            parsed, _ = _parse_rate(rate)
+            rate_num = float(parsed or 0)
+        except Exception:
+            try:
+                rate_num = float(str(rate).replace("$", "").replace("/ton", "").strip() or 0)
+            except ValueError:
+                rate_num = 0.0
+    total = rate_num * float(weight_tons)
+    try:
+        driver = str(get_active_owner() or "Phillip / Lawson")
+    except Exception:
+        driver = "Phillip / Lawson"
+    return {
+        "company": company or "Shipper",
+        "contact_name": company or "there",
+        "commodity": commodity or "Aggregate",
+        "weight_tons": float(weight_tons),
+        "origin": origin or TARGET_LANE_DESTINATION,
+        "destination": destination or TARGET_LANE_ORIGIN,
+        "rate_per_ton": rate_num or float(PRIMARY_LANE.get("baseline_rate_per_ton") or 48),
+        "total_revenue": total
+        or float(PRIMARY_LANE.get("baseline_rate_per_ton") or 48) * float(weight_tons),
+        "valid_through": "end of week",
+        "driver": driver,
+        "phone": get_secret("twilio", "dispatch_phone", ""),
+    }
+
+
 def _render_return_decision_card(
     *,
     scored: Any,
@@ -1984,6 +2241,8 @@ def _render_return_decision_card(
     rate_display: str,
     key_prefix: str,
     on_use: Callable[[], None] | None = None,
+    quote_ctx: dict[str, Any] | None = None,
+    quote_phone: str | None = None,
     show_buckets: bool = True,
     expanded_why: bool = False,
 ) -> None:
@@ -2000,10 +2259,11 @@ def _render_return_decision_card(
     st.markdown(f"**{lane}**")
     empty_pu = benefit.get("empty_to_pickup_mi")
     loaded_mi = benefit.get("loaded_return_mi")
+    src = benefit.get("miles_source") or "heuristic"
     if isinstance(empty_pu, (int, float)) and isinstance(loaded_mi, (int, float)):
         st.caption(
             f"{commodity or '—'} · {rate_display or 'n/a'} · "
-            f"empty→PU ~{empty_pu:.0f} mi · loaded ~{loaded_mi:.0f} mi"
+            f"empty→PU ~{empty_pu:.0f} mi · loaded ~{loaded_mi:.0f} mi · miles: {src}"
         )
     else:
         st.caption(f"{commodity or '—'} · {rate_display or 'n/a'}")
@@ -2029,9 +2289,68 @@ def _render_return_decision_card(
         for reason in scored.reasons:
             st.markdown(f"- {reason}")
 
+    use_col, quote_col = st.columns(2)
     if on_use is not None:
-        if st.button("Use this", key=f"{key_prefix}_use", use_container_width=True, type="primary"):
-            on_use()
+        with use_col:
+            if st.button(
+                "Use this return",
+                key=f"{key_prefix}_use",
+                use_container_width=True,
+                type="primary",
+            ):
+                on_use()
+    with quote_col:
+        if st.button("Quote SMS", key=f"{key_prefix}_quote_sms", use_container_width=True):
+            st.session_state[f"{key_prefix}_show_quote"] = True
+
+    if st.session_state.get(f"{key_prefix}_show_quote"):
+        ctx = quote_ctx or _quote_sms_context_from_candidate(
+            company="",
+            commodity=commodity,
+            origin="",
+            destination="",
+            rate=rate_display,
+        )
+        try:
+            from lp_helpers.followup_templates import (
+                _clipboard_button,
+                build_followup_message,
+            )
+
+            msg = build_followup_message("rate_quote_sms", ctx)
+        except Exception:
+            msg = (
+                f"L & P FREIGHT | RATE QUOTE\n{ctx.get('company')}\n"
+                f"{ctx.get('commodity')} · {ctx.get('weight_tons')}t\n"
+                f"{ctx.get('origin')} → {ctx.get('destination')}\n"
+                f"${ctx.get('rate_per_ton')}/ton"
+            )
+            _clipboard_button = None  # type: ignore[assignment]
+        body_key = f"{key_prefix}_quote_body"
+        st.text_area("Rate quote SMS", msg, height=140, key=body_key)
+        # Prefer edited widget value when sending
+        body_to_send = str(st.session_state.get(body_key) or msg)
+        if _clipboard_button is not None:
+            _clipboard_button(body_to_send, f"{key_prefix}_clip")
+        phone = quote_phone or ""
+        phone_in = st.text_input(
+            "Send to (E.164)",
+            value=phone,
+            key=f"{key_prefix}_quote_phone",
+            placeholder="+18285550123",
+        )
+        if st.button("Send / log SMS", key=f"{key_prefix}_quote_send", use_container_width=True):
+            send_body = str(st.session_state.get(body_key) or body_to_send or msg)
+            ok, detail = try_send_sms(
+                phone_in or phone,
+                send_body,
+                "rate_quote_sms",
+                lead_id=None,
+            )
+            if ok:
+                st.success(detail)
+            else:
+                st.warning(detail)
 
 
 def _seed_return_board_if_empty() -> None:
@@ -2120,7 +2439,7 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
     h3.metric("Fuel if pure empty", f"${pure_empty_fuel:,.0f}")
     st.caption(
         f"Home corridor: **{TARGET_LANE_ORIGIN}** · Baseline bulk ~**${DEFAULT_LANE_BASELINE_PER_TON:g}/ton**. "
-        "Estimates are corridor heuristics — not GPS routes."
+        "Miles: OSRM when cities geocode, else corridor heuristics."
     )
 
     # --- Ranked board returns first (decision-first UX) ---
@@ -2187,8 +2506,17 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
                     ),
                     deadhead_miles=float(benefit.get("empty_to_pickup_mi") or 40),
                     loaded_miles=float(benefit.get("loaded_return_mi") or 220),
+                    nav_hint="Return booked into Logger — generate BOL after status moves",
                 )
 
+            qctx = _quote_sms_context_from_candidate(
+                company=str(cand.get("contact") or ""),
+                commodity=str(cand.get("commodity") or "Aggregate"),
+                origin=str(cand.get("origin") or empty_at),
+                destination=str(cand.get("destination") or ""),
+                rate=cand.get("rate") or cand.get("rate_per_ton"),
+                weight_tons=24.0,
+            )
             with st.container():
                 _render_return_decision_card(
                     scored=sc,
@@ -2198,6 +2526,7 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
                     rate_display=str(cand.get("rate") or "n/a"),
                     key_prefix=f"dh_board_{i}",
                     on_use=_use_cand,
+                    quote_ctx=qctx,
                     show_buckets=False,
                 )
                 st.divider()
@@ -2259,8 +2588,17 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
                 ),
                 deadhead_miles=float(benefit.get("empty_to_pickup_mi") or 40),
                 loaded_miles=float(benefit.get("loaded_return_mi") or 220),
+                nav_hint="Return booked into Logger — generate BOL after status moves",
             )
 
+        manual_qctx = _quote_sms_context_from_candidate(
+            company="",
+            commodity=ret_commodity if ret_commodity != "Other" else "Aggregate",
+            origin=ret_origin,
+            destination=ret_dest,
+            rate=ret_rate,
+            weight_tons=float(ret_tons),
+        )
         _render_return_decision_card(
             scored=scored,
             benefit=benefit,
@@ -2269,6 +2607,7 @@ def _render_deadhead_return_panel(loads_df: pd.DataFrame) -> None:
             rate_display=f"${ret_rate}/ton" if ret_rate else "n/a",
             key_prefix="dh_manual",
             on_use=_use_manual,
+            quote_ctx=manual_qctx,
             show_buckets=True,
             expanded_why=True,
         )
@@ -2361,6 +2700,101 @@ def render_dashboard_tab() -> None:
 
     render_target_lane_banner()
     st.info(f"**{CARRIER_NAME} Mission:** {MISSION_BLURB}")
+
+    # --- Call today strip ---
+    try:
+        from lp_helpers.crm import filter_call_today_leads
+
+        call_today = filter_call_today_leads(
+            leads_df.to_dict("records") if not leads_df.empty else []
+        )
+    except Exception:
+        call_today = []
+    if call_today:
+        with st.container():
+            st.markdown("#### 📞 Call today")
+            for lead in call_today[:6]:
+                c1, c2, c3 = st.columns([2, 1, 1])
+                c1.markdown(
+                    f"**{lead.get('company', '—')}** · {lead.get('status', '—')} · "
+                    f"{lead.get('phone') or 'no phone'}"
+                )
+                fu = lead.get("next_followup_at") or "—"
+                c1.caption(f"Next follow-up: {fu} · last: {lead.get('last_contact') or '—'}")
+                lid = int(lead["id"]) if lead.get("id") is not None else None
+                if c2.button("Log called", key=f"dash_called_{lid}", use_container_width=True):
+                    try:
+                        from lp_helpers.crm import next_followup_iso
+
+                        next_fu = next_followup_iso(days=3)
+                        last_contact = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        with closing(get_connection()) as conn:
+                            conn.execute(
+                                """
+                                UPDATE leads
+                                SET last_contact = ?,
+                                    next_followup_at = ?,
+                                    status = CASE WHEN status = 'New' THEN 'Contacted' ELSE status END
+                                WHERE id = ?
+                                """,
+                                (last_contact, next_fu, lid),
+                            )
+                            conn.execute(
+                                """
+                                INSERT INTO call_logs (lead_id, call_type, notes, outcome)
+                                VALUES (?, 'Follow-up', 'Call today queue', 'Spoke — load offered')
+                                """,
+                                (lid,),
+                            )
+                            conn.commit()
+                        clear_data_caches()
+                        st.success(f"Logged call — {lead.get('company')}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+                if c3.button("Rate quote", key=f"dash_quote_{lid}", use_container_width=True):
+                    st.session_state.active_tab = "Alerts"
+                    st.session_state.nav_hint = (
+                        f"Opened **Alerts** — quote template for {lead.get('company')}"
+                    )
+                    st.session_state["filter_leads_search"] = str(lead.get("company") or "")
+                    st.rerun()
+            st.divider()
+
+    # --- Low days-of-supply banner ---
+    try:
+        from lp_helpers.inventory import fetch_low_supply_leads
+
+        with closing(get_connection()) as conn:
+            low_supply = fetch_low_supply_leads(conn, threshold_days=5)
+    except Exception:
+        low_supply = []
+    if low_supply:
+        names = ", ".join(str(r.get("company") or "?") for r in low_supply[:4])
+        st.warning(
+            f"⚠️ Low days of supply ({len(low_supply)}): {names}. "
+            "Replenish before bins run dry."
+        )
+        for ls in low_supply[:3]:
+            if st.button(
+                f"Log replenishment load — {ls.get('company')}",
+                key=f"dash_replen_{ls.get('id')}",
+                use_container_width=True,
+            ):
+                dest_hint = str(ls.get("lane_notes") or TARGET_LANE_DESTINATION)
+                commodity = str(ls.get("commodity_focus") or "Feldspar").split(",")[0].strip()
+                prefill_load_logger(
+                    shipper=str(ls.get("company") or ""),
+                    commodity=commodity or "Feldspar",
+                    origin=TARGET_LANE_ORIGIN,
+                    destination=dest_hint if dest_hint else TARGET_LANE_DESTINATION,
+                    weight=24.0,
+                    rate_per_ton=float(PRIMARY_LANE.get("baseline_rate_per_ton") or 48),
+                    status="Potential",
+                    notes=f"Replenishment · DOS {ls.get('days_of_supply_est')} days",
+                    deadhead_miles=float(DEFAULT_DEADHEAD_MILES),
+                    loaded_miles=float(DEFAULT_LANE_MILES),
+                )
 
     st.markdown('<div class="lf-dash-kpi-marker"></div>', unsafe_allow_html=True)
 
@@ -2468,6 +2902,108 @@ div[data-testid="stElementContainer"]:has(.lf-dash-kpi-marker) + div[data-testid
 
     # --- First-class deadhead panel (not buried in expander) ---
     _render_deadhead_return_panel(loads_df)
+
+    # --- Settlements lite ---
+    with st.expander("Settlements", expanded=False):
+        st.caption("Close delivered loads · total_pay = net after empty miles")
+        try:
+            from lp_helpers.settlements import (
+                SettlementExistsError,
+                compute_settlement_for_load,
+                fetch_recent_settlements,
+                generate_settlement_pdf,
+                insert_settlement,
+            )
+
+            closeable = []
+            if not loads_df.empty and "status" in loads_df.columns:
+                closeable = loads_df[
+                    loads_df["status"]
+                    .astype(str)
+                    .str.lower()
+                    .isin(["delivered", "completed", "complete", "paid"])
+                ]
+            if closeable is not None and not getattr(closeable, "empty", True):
+                opts = {
+                    f"#{int(r['id'])} {r.get('bol_number') or ''} — {r.get('shipper')} "
+                    f"({r.get('status')})": r.to_dict()
+                    for _, r in closeable.head(20).iterrows()
+                }
+                pick = st.selectbox("Load to close", list(opts.keys()), key="dash_settle_pick")
+                load_s = opts[pick]
+                preview_sett = compute_settlement_for_load(
+                    load_s,
+                    fuel_per_mi=FUEL_COST_PER_MILE,
+                    ops_per_mi=OPS_COST_PER_MILE,
+                    driver_name=str(get_active_owner() or "Owner-Operator"),
+                )
+                if float(preview_sett.get("net") or 0) < 0:
+                    st.warning(
+                        f"Net is negative (${preview_sett['net']:,.2f}) — "
+                        "deadhead cost exceeds revenue for this load."
+                    )
+                if st.button("Close settlement", type="primary", key="dash_settle_close"):
+                    sett = preview_sett
+                    try:
+                        with closing(get_connection()) as conn:
+                            sid = insert_settlement(conn, sett)
+                            sett["id"] = sid
+                        try:
+                            pdf_b = generate_settlement_pdf(sett, load_s)
+                            st.session_state["settlement_pdf"] = pdf_b
+                            st.session_state["settlement_pdf_name"] = (
+                                f"LP_Settlement_{sid}_{date.today().isoformat()}.pdf"
+                            )
+                        except Exception as exc:
+                            st.warning(f"PDF unavailable (settlement saved): {exc}")
+                        st.success(
+                            f"Settlement #{sid} closed · pay ${sett['total_pay']:,.2f} "
+                            f"(net after empty miles)"
+                        )
+                    except SettlementExistsError as exc:
+                        st.warning(
+                            f"Already closed — settlement #{exc.existing_id} exists for this load."
+                        )
+                    except Exception as exc:
+                        st.error(f"Settlement failed: {exc}")
+                if st.session_state.get("settlement_pdf"):
+                    st.download_button(
+                        "Download settlement PDF",
+                        st.session_state["settlement_pdf"],
+                        st.session_state.get(
+                            "settlement_pdf_name", "LP_Settlement.pdf"
+                        ),
+                        mime="application/pdf",
+                        key="dash_settle_dl",
+                    )
+            else:
+                st.caption("No Delivered/Completed/Paid loads yet.")
+
+            with closing(get_connection()) as conn:
+                recent = fetch_recent_settlements(conn, limit=8)
+            if recent:
+                st.markdown("**Recent settlements**")
+                st.dataframe(
+                    pd.DataFrame(recent)[
+                        [
+                            c
+                            for c in (
+                                "id",
+                                "created_at",
+                                "bol_number",
+                                "shipper",
+                                "driver_name",
+                                "total_pay",
+                                "status",
+                            )
+                            if c in recent[0]
+                        ]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        except Exception as exc:
+            st.caption(f"Settlements unavailable: {exc}")
 
     st.markdown("#### Quick Actions")
     action1, action2, action3, action4 = st.columns(4)
@@ -2694,6 +3230,25 @@ def render_leads_crm_tab() -> None:
         )
         call_type = st.selectbox("Call type", CALL_TYPES)
         outcome = st.selectbox("Outcome", CALL_OUTCOMES)
+        raw_fu = lead_row.get("next_followup_at")
+        if raw_fu:
+            try:
+                _fu_default = date.fromisoformat(str(raw_fu)[:10])
+            except ValueError:
+                _fu_default = date.today() + timedelta(days=3)
+        else:
+            _fu_default = date.today() + timedelta(days=3)
+        next_followup = st.date_input(
+            "Next follow-up",
+            value=_fu_default,
+            key=f"lead_next_fu_{lead_id}",
+        )
+        followup_notes = st.text_input(
+            "Follow-up notes",
+            value=str(lead_row.get("followup_notes") or ""),
+            key=f"lead_fu_notes_{lead_id}",
+            placeholder="Callback AM, ask for rate…",
+        )
     with col2:
         st.markdown(f"**Phone:** {lead_row.get('phone', '—')}")
         st.markdown(f"**Commodity focus:** {lead_row.get('commodity_focus', '—')}")
@@ -2713,10 +3268,17 @@ def render_leads_crm_tab() -> None:
                 conn.execute(
                     """
                     UPDATE leads
-                    SET status = ?, lane_notes = ?, last_contact = datetime('now')
+                    SET status = ?, lane_notes = ?, last_contact = datetime('now'),
+                        next_followup_at = ?, followup_notes = ?
                     WHERE id = ?
                     """,
-                    (new_status, combined_notes, lead_id),
+                    (
+                        new_status,
+                        combined_notes,
+                        next_followup.isoformat() if next_followup else None,
+                        followup_notes or "",
+                        lead_id,
+                    ),
                 )
                 conn.execute(
                     """
@@ -2749,6 +3311,10 @@ def render_load_logger_tab() -> None:
     """Fast bulk load logger — core fields first, extras optional."""
     st.subheader("Log a load")
     st.caption("Bulk / end-dump speed path — shipper · commodity · tons · $/ton · destination.")
+
+    _flash = st.session_state.pop("logger_save_flash", None)
+    if _flash:
+        st.success(_flash)
 
     # Durable prefill: keep until applied on Logger (survives wrong-tab navigation)
     prefill: dict = {}
@@ -3088,14 +3654,19 @@ def render_load_logger_tab() -> None:
                 )
             except Exception:
                 pass
-            notify_dispatcher_new_load(saved_load)
-            maybe_auto_notify_load(saved_load, lead_phone)
+            nd = notify_dispatcher_new_load(saved_load)
+            na = maybe_auto_notify_load(saved_load, lead_phone)
             # Clear sticky draft fields for next log (keep shipper optional)
             for k in ("load_notes",):
                 st.session_state.pop(k, None)
-            st.success(
+            flash_bits = [
                 f"Saved · {load_status} · BOL {bol} · ${revenue_preview:,.0f} · {level} fit"
-            )
+            ]
+            if nd is not None:
+                flash_bits.append(f"Dispatcher SMS: {nd[1]}")
+            if na is not None:
+                flash_bits.append(f"Status SMS: {na[1]}")
+            st.session_state["logger_save_flash"] = " · ".join(flash_bits)
             st.rerun()
 
     st.divider()
@@ -4228,16 +4799,17 @@ def render_alerts_tab() -> None:
         run_platform_health_check()
     st.divider()
 
-    tw_ok = all([
-        get_secret("twilio", "account_sid"),
-        get_secret("twilio", "auth_token"),
-        get_secret("twilio", "from_number"),
-    ])
+    tw_ok = twilio_configured()
     smtp_ok = all([
         get_secret("smtp", "host"),
         get_secret("smtp", "user"),
         get_secret("smtp", "password"),
     ])
+    if not tw_ok:
+        st.warning(
+            "Twilio incomplete — SMS will be **logged only** "
+            "(add account_sid, auth_token, from_number under [twilio] in secrets.toml)."
+        )
     status_cols = st.columns(2)
     if tw_ok:
         status_cols[0].success("Twilio SMS ready")
@@ -4250,8 +4822,9 @@ def render_alerts_tab() -> None:
 
     dispatch_phone = st.text_input(
         "Dispatch Phone (E.164)",
-        value=get_secret("twilio", "dispatch_phone", "+18284678218"),
+        value=get_secret("twilio", "dispatch_phone", ""),
         key="twilio_dispatch_phone",
+        placeholder="+1XXXXXXXXXX",
     )
     if dispatch_phone != _local_get_setting("twilio_dispatch_phone", ""):
         persist_setting("twilio_dispatch_phone", dispatch_phone)
@@ -4271,13 +4844,12 @@ def render_alerts_tab() -> None:
     save_filter("sms_auto_send", "1" if auto_send else "0")
 
     if st.button("Send Test Alert", key="twilio_test_alert"):
-        try:
-            body = "L & P FREIGHT Alert: New load opportunity ready."
-            tw_sid = send_twilio_notification(dispatch_phone, body)
-            log_sms_event(None, "test_alert", body, "twilio", tw_sid)
-            st.success("Test SMS sent!")
-        except Exception as exc:
-            st.error(str(exc))
+        body = "L & P FREIGHT Alert: New load opportunity ready."
+        ok, detail = try_send_sms(dispatch_phone, body, "test_alert")
+        if ok:
+            st.success(detail)
+        else:
+            st.warning(detail)
 
     st.markdown("#### Automation Rules")
     st.write("• **New Load Logged** → SMS to dispatcher")
@@ -4357,18 +4929,16 @@ def render_alerts_tab() -> None:
             if not to_num:
                 st.error("Enter a phone number or select a lead with a phone.")
             else:
-                try:
-                    tw_sid = send_twilio_notification(to_num, sms_text)
-                    log_sms_event(
-                        lead.get("id") if isinstance(lead.get("id"), int) else None,
-                        alert_type,
-                        sms_text,
-                        "twilio",
-                        tw_sid,
-                    )
-                    st.success(f"Sent — SID {tw_sid}")
-                except Exception as exc:
-                    st.error(str(exc))
+                ok, detail = try_send_sms(
+                    to_num,
+                    sms_text,
+                    alert_type,
+                    lead_id=lead.get("id") if isinstance(lead.get("id"), int) else None,
+                )
+                if ok:
+                    st.success(detail)
+                else:
+                    st.warning(detail)
     else:
         test_email = b2.text_input(
             "Send to (email)",
@@ -4406,7 +4976,7 @@ def render_alerts_tab() -> None:
         quote_ctx: dict[str, Any] = {
             "contact_name": lead.get("contact_name") or lead.get("company") or "there",
             "company": lead.get("company") or "Shipper",
-            "phone": str(lead.get("phone") or get_secret("twilio", "dispatch_phone", "+18284678218")),
+            "phone": str(lead.get("phone") or get_secret("twilio", "dispatch_phone", "")),
             "email": str(lead.get("email") or ""),
             "commodity": "Feldspar",
             "weight_tons": 24.0,
@@ -4485,15 +5055,17 @@ def render_alerts_tab() -> None:
 
     st.divider()
     render_section_header("Alert Log", icon="📋")
+    st.caption("Recent SMS rows — sent_via + twilio_sid show delivery path")
     try:
         with closing(get_connection()) as conn:
             sms_df = pd.read_sql_query(
                 """
-                SELECT s.*, l.company
+                SELECT s.logged_at, s.alert_type, s.sent_via, s.twilio_sid,
+                       l.company, s.message
                 FROM sms_log s
                 LEFT JOIN leads l ON s.lead_id = l.id
                 ORDER BY s.logged_at DESC
-                LIMIT 25
+                LIMIT 15
                 """,
                 conn,
             )
@@ -4502,7 +5074,8 @@ def render_alerts_tab() -> None:
 
             render_empty_state("💬", "No messages logged yet.")
         else:
-            st.dataframe(sms_df, use_container_width=True, hide_index=True)
+            show = [c for c in ("logged_at", "alert_type", "sent_via", "twilio_sid", "company", "message") if c in sms_df.columns]
+            st.dataframe(sms_df[show].head(10), use_container_width=True, hide_index=True)
     except sqlite3.Error:
         st.caption("SMS log table not initialized — run main app once to init_db().")
 
@@ -4538,6 +5111,60 @@ def render_bol_generator_tab() -> None:
         st.markdown(f"**Route:** {load.get('origin', TARGET_LANE_ORIGIN)} → {load.get('destination', '—')}")
         st.markdown(f"**Revenue:** ${float(load.get('total_revenue', 0)):,.2f}")
         st.markdown(f"**Status:** {load.get('status', 'Logged')}")
+
+    # Close settlement for delivered loads
+    status_l = str(load.get("status") or "").lower()
+    if status_l in ("delivered", "completed", "complete", "paid") and load.get("id") is not None:
+        try:
+            from lp_helpers.settlements import (
+                SettlementExistsError,
+                compute_settlement_for_load,
+                generate_settlement_pdf,
+                insert_settlement,
+            )
+
+            bol_sett_preview = compute_settlement_for_load(
+                load,
+                fuel_per_mi=FUEL_COST_PER_MILE,
+                ops_per_mi=OPS_COST_PER_MILE,
+                driver_name=str(get_active_owner() or "Owner-Operator"),
+            )
+            if float(bol_sett_preview.get("net") or 0) < 0:
+                st.warning(
+                    f"Net is negative (${bol_sett_preview['net']:,.2f}) — "
+                    "deadhead cost exceeds revenue."
+                )
+            if st.button("Close settlement", key="bol_close_settlement", use_container_width=True):
+                sett = bol_sett_preview
+                try:
+                    with closing(get_connection()) as conn:
+                        sid = insert_settlement(conn, sett)
+                        sett["id"] = sid
+                    try:
+                        pdf_b = generate_settlement_pdf(sett, load)
+                        st.session_state["settlement_pdf"] = pdf_b
+                        st.session_state["settlement_pdf_name"] = (
+                            f"LP_Settlement_{sid}_{date.today().isoformat()}.pdf"
+                        )
+                    except Exception as pdf_exc:
+                        st.warning(f"PDF unavailable (settlement saved): {pdf_exc}")
+                    st.success(f"Settlement #{sid} · net pay ${sett['total_pay']:,.2f}")
+                except SettlementExistsError as exc:
+                    st.warning(
+                        f"Already closed — settlement #{exc.existing_id} exists for this load."
+                    )
+                except Exception as exc:
+                    st.error(f"Settlement failed: {exc}")
+        except Exception as exc:
+            st.caption(f"Settlements unavailable: {exc}")
+        if st.session_state.get("settlement_pdf"):
+            st.download_button(
+                "Download settlement PDF",
+                st.session_state["settlement_pdf"],
+                st.session_state.get("settlement_pdf_name", "LP_Settlement.pdf"),
+                mime="application/pdf",
+                key="bol_settle_dl",
+            )
 
     pdf_name = bol_pdf_filename(load)
 
@@ -4823,6 +5450,7 @@ def safe_render_driver_view() -> None:
             get_traccar_status=_traccar_status_for_driver,
             format_sms=format_sms,
             log_sms_event=log_sms_event,
+            try_send_sms=try_send_sms,
             on_emergency=dispatch_emergency,
             on_exit=_on_exit,
         )
@@ -4988,8 +5616,6 @@ def render_day_night_toggle():
 
 
 def main() -> None:
-    auto_backup_db()
-
     st.set_page_config(
         page_title=PAGE_TITLE,
         page_icon="🚛",
@@ -5024,6 +5650,33 @@ def main() -> None:
 
     # Solo fleets: implied owner_driver role (multi-user later)
     st.session_state.setdefault("user_role", "owner_driver")
+
+    # Optional password gate (public URL). Unset password → no gate.
+    # Fail-closed: if a password is configured, never fall through on errors.
+    from lp_helpers.auth_gate import password_required, resolve_app_password
+
+    _app_pw = ""
+    try:
+        _app_pw = resolve_app_password(secrets_getter=get_secret)
+    except Exception as exc:
+        # If env password is set, still require auth even when secrets explode
+        import os as _os
+
+        _app_pw = str(_os.environ.get("LP_APP_PASSWORD") or "").strip()
+        if _app_pw:
+            log.warning("Auth secrets resolve failed; using LP_APP_PASSWORD: %s", exc)
+        else:
+            log.warning("Auth password resolve failed and no env set: %s", exc)
+
+    if password_required(_app_pw) and not st.session_state.get("authenticated"):
+        try:
+            apply_platform_theme(bool(st.session_state.get("night_mode", True)))
+        except Exception:
+            pass
+        _render_auth_login_gate(_app_pw)  # always st.stop()
+
+    # Backups only after auth (or when gate is disabled)
+    auto_backup_db()
 
     apply_platform_theme(bool(st.session_state.night_mode))
 
@@ -5120,6 +5773,45 @@ def render_inventory_tab() -> None:
         render_empty_state,
         render_section_header,
     )
+
+    # Low supply first (actionable)
+    render_section_header("Low supply — act now", icon="⚠️")
+    try:
+        from lp_helpers.inventory import fetch_low_supply_leads
+
+        with closing(get_connection()) as conn:
+            low_supply = fetch_low_supply_leads(conn, threshold_days=5)
+    except Exception:
+        low_supply = []
+    if not low_supply:
+        st.caption("No leads under 5 days of supply.")
+    else:
+        for ls in low_supply:
+            dos = ls.get("days_of_supply_est")
+            st.markdown(
+                f"**{ls.get('company')}** · {render_days_of_supply(float(dos) if dos is not None else None)} · "
+                f"{ls.get('commodity_focus') or '—'}",
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                f"Log replenishment load — {ls.get('company')}",
+                key=f"inv_replen_{ls.get('id')}",
+                use_container_width=True,
+            ):
+                dest_hint = str(ls.get("lane_notes") or TARGET_LANE_DESTINATION)
+                commodity = str(ls.get("commodity_focus") or "Feldspar").split(",")[0].strip()
+                prefill_load_logger(
+                    shipper=str(ls.get("company") or ""),
+                    commodity=commodity or "Feldspar",
+                    origin=TARGET_LANE_ORIGIN,
+                    destination=dest_hint if dest_hint else TARGET_LANE_DESTINATION,
+                    weight=24.0,
+                    rate_per_ton=float(PRIMARY_LANE.get("baseline_rate_per_ton") or 48),
+                    status="Potential",
+                    notes=f"Replenishment · DOS {ls.get('days_of_supply_est')} days",
+                    deadhead_miles=float(DEFAULT_DEADHEAD_MILES),
+                    loaded_miles=float(DEFAULT_LANE_MILES),
+                )
 
     render_section_header("Bin Estimates", icon="🗑️")
     st.caption("Driver bin-level estimates · days of supply = est_tons / avg_weekly_tons × 7")

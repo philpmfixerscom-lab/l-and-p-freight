@@ -341,9 +341,11 @@ def simulate_rate_profit(
 def simulate_document_ocr(
     filename: str, hint_text: str = "", demo_pick: int = 0
 ) -> dict[str, Any]:
-    """
-    Placeholder OCR — rule-based extraction for offline demo.
-    Real OCR can replace this function later (Tesseract / cloud API).
+    """DEMO ONLY — not real OCR; never use for legal BOL data.
+
+    Rule-based placeholder extraction for offline demos only.
+    Real OCR can replace this later (Tesseract / cloud API) — do not
+    treat returned fields as authoritative for contracts or BOLs.
     """
     templates = [
         {

@@ -1,10 +1,11 @@
 """
-L & P Freight — Mobile Driver App (bottom-nav, large touch targets, dark cabin mode).
+L & P Freight — Mobile Driver App (LEGACY shell).
 
-Run standalone:
+Superseded by `lp_helpers.driver_mobile` via main app `?view=driver`
+(or Driver View button in sidebar). Prefer that path for production.
+
+Historical standalone entry (not the primary cab UI):
     streamlit run mobile_app.py --server.port 8503
-
-Or from main app via ?page=driver query param.
 """
 
 from __future__ import annotations

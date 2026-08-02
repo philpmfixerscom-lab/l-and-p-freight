@@ -419,6 +419,7 @@ def render_driver_app(
     get_traccar_status: Callable[[], dict[str, Any] | None] | None = None,
     format_sms: Callable[[str, dict[str, Any]], str] | None = None,
     log_sms_event: Callable[..., None] | None = None,
+    try_send_sms: Callable[..., tuple[bool, str]] | None = None,
     on_emergency: Callable[[str, str, dict[str, Any]], tuple[bool, str]] | None = None,
     on_exit: Callable[[], None] | None = None,
     **_ignored: Any,
@@ -612,8 +613,42 @@ def render_driver_app(
             type="secondary",
             key="driver_arrival_log",
         ):
-            log_sms_event(None, "driver_arrival", arrival_msg, "driver_app")
-            st.success("Arrival logged — send from dispatch Alerts tab.")
+            if try_send_sms is not None:
+                dispatch_phone = str(
+                    st.session_state.get("twilio_dispatch_phone")
+                    or st.session_state.get("dispatch_phone")
+                    or ""
+                ).strip()
+                if not dispatch_phone:
+                    try:
+                        # Prefer secrets / env via Streamlit secrets if available
+                        import os
+
+                        dispatch_phone = str(os.environ.get("LP_DISPATCH_PHONE") or "").strip()
+                        if not dispatch_phone:
+                            try:
+                                import streamlit as _st
+
+                                dispatch_phone = str(
+                                    _st.secrets.get("twilio", {}).get("dispatch_phone", "") or ""
+                                ).strip()
+                            except Exception:
+                                pass
+                    except Exception:
+                        dispatch_phone = ""
+                ok, detail = try_send_sms(
+                    dispatch_phone,
+                    arrival_msg,
+                    "driver_arrival",
+                    None,
+                )
+                if ok:
+                    st.success(detail)
+                else:
+                    st.warning(detail)
+            else:
+                log_sms_event(None, "driver_arrival", arrival_msg, "driver_app")
+                st.success("Arrival logged — send from dispatch Alerts tab.")
 
 
 def _fetch_lead_options(get_connection: Callable[[], Any]) -> list[dict[str, Any]]:

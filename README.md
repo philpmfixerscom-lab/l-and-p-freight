@@ -99,9 +99,17 @@ auth_token = "your_token"
 from_number = "+1your_twilio_number"
 dispatch_phone = "+18284678218"
 auto_send_new_load = "1"
+
+# Optional: gate the app when the URL is public (omit or leave empty for local solo)
+[auth]
+password = ""
 ```
 
+Env alternative: `LP_APP_PASSWORD`. Unset/empty → no login gate.
+
 **Alerts tab** → Send Test Alert · Auto SMS on new load · Auto SMS on Dispatched/In Transit · rate quote / follow-up templates
+
+**Backups** → sidebar *Backups* expander: create now, restore with confirm (keeps max 14, skips if <6h and DB unchanged)
 
 ### BulkLoads.com live postings
 

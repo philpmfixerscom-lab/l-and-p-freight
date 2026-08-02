@@ -1097,6 +1097,8 @@ def init_db() -> None:
             ("last_estimate_date", "TEXT"),
             ("last_estimate_tons", "REAL"),
             ("days_of_supply_est", "REAL"),
+            ("next_followup_at", "TEXT"),
+            ("followup_notes", "TEXT"),
         ):
             if col not in lead_cols:
                 conn.execute(f"ALTER TABLE leads ADD COLUMN {col} {coltype}")
@@ -1184,7 +1186,10 @@ def init_db() -> None:
             ("bin_capacity_tons", "REAL"),
             ("last_estimate_level", "TEXT"),
             ("last_estimate_date", "TEXT"),
+            ("last_estimate_tons", "REAL"),
             ("days_of_supply_est", "REAL"),
+            ("next_followup_at", "TEXT"),
+            ("followup_notes", "TEXT"),
         ):
             if col not in lead_cols:
                 conn.execute(f"ALTER TABLE leads ADD COLUMN {col} {coltype}")

@@ -377,6 +377,29 @@ def render_days_of_supply(days: float | None) -> str:
     return f"<span style='color:{color}; font-weight:600'>{label}</span>"
 
 
+def fetch_low_supply_leads(conn: Any, threshold_days: float = 5.0) -> list[dict[str, Any]]:
+    """Leads with days_of_supply_est below threshold (non-null).
+
+    Ordered by days ascending (most urgent first).
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, company, phone, commodity_focus, lane_notes, status,
+                   days_of_supply_est, last_contact, last_estimate_level,
+                   last_estimate_tons, avg_weekly_tons
+            FROM leads
+            WHERE days_of_supply_est IS NOT NULL
+              AND days_of_supply_est < ?
+            ORDER BY days_of_supply_est ASC
+            """,
+            (float(threshold_days),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 def level_to_tons(level: str, bin_capacity_tons: float = 24.0) -> float:
     """Convert a human-readable level label to estimated tons."""
     ratio = LEVEL_TONS_MAP.get(level, 0.0)

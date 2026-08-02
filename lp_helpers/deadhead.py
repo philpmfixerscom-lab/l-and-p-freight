@@ -499,15 +499,22 @@ def opportunities_as_candidates(opportunities_df: Any) -> list[dict[str, Any]]:
     return out
 
 
+_DELIVERED_STATUSES = frozenset(
+    {"delivered", "complete", "completed", "paid"}
+)
+
+
 def last_delivery_location(loads_df: Any) -> str | None:
-    """Best-effort 'where am I empty' from recent delivered loads."""
+    """Best-effort 'where am I empty' from recent delivered/completed/paid loads."""
     try:
         if loads_df is None or getattr(loads_df, "empty", True):
             return None
         df = loads_df.copy()
         if "status" not in df.columns:
             return None
-        delivered = df[df["status"].astype(str).str.lower().isin(["delivered", "complete", "completed"])]
+        delivered = df[
+            df["status"].astype(str).str.lower().isin(_DELIVERED_STATUSES)
+        ]
         if delivered.empty:
             # fall back to any load with destination
             use = df
@@ -578,11 +585,31 @@ def estimate_return_benefit(
 ) -> dict[str, Any]:
     """Dollar/mile style benefit vs running empty all the way home.
 
-    v1 uses corridor heuristics — not GPS routing. Shown as estimates.
+    Uses public OSRM road miles when corridor cities geocode; otherwise
+    corridor keyword heuristics. Caption/blurb always notes the source.
     """
+    miles_source = "heuristic"
     empty_home = estimate_empty_home_miles(current_location, home)
     empty_to_pu = estimate_empty_to_pickup(origin, current_location)
     loaded_mi = estimate_loaded_toward_home(destination, home)
+
+    try:
+        from lp_helpers.distance import estimate_road_miles
+
+        road_home = estimate_road_miles(current_location, home)
+        if road_home is not None and road_home > 0:
+            empty_home = road_home
+            miles_source = "osrm"
+        road_pu = estimate_road_miles(current_location, origin) if origin else None
+        if road_pu is not None and road_pu >= 0:
+            empty_to_pu = road_pu
+            miles_source = "osrm" if miles_source == "osrm" else "osrm+heuristic"
+        road_loaded = estimate_road_miles(origin, destination) if origin and destination else None
+        if road_loaded is not None and road_loaded > 0:
+            loaded_mi = road_loaded
+            miles_source = "osrm" if "osrm" in miles_source else "osrm+heuristic"
+    except Exception:
+        miles_source = "heuristic"
 
     # Remaining empty after drop if not fully home (simplified)
     remaining_empty = max(0.0, empty_home - loaded_mi * 0.85) if score.direction_pts >= 18 else empty_home * 0.5
@@ -607,6 +634,22 @@ def estimate_return_benefit(
     extra_empty_fuel = empty_to_pu * fuel_cost_per_mile
     net_benefit = revenue - extra_empty_fuel
 
+    src_note = (
+        "OSRM road miles"
+        if miles_source == "osrm"
+        else (
+            "mixed OSRM + corridor heuristic"
+            if "osrm" in miles_source
+            else "corridor heuristic (not GPS)"
+        )
+    )
+    blurb = (
+        f"Est. +${net_benefit:,.0f} vs pure empty home "
+        f"(~${revenue:,.0f} revenue − ~${extra_empty_fuel:,.0f} fuel to shipper) · {src_note}"
+        if revenue > 0
+        else f"Score-only · fill rate for $ estimate · empty home ~{empty_home:.0f} mi · {src_note}"
+    )
+
     return {
         "empty_home_mi": round(empty_home, 0),
         "empty_to_pickup_mi": round(empty_to_pu, 0),
@@ -616,10 +659,6 @@ def estimate_return_benefit(
         "net_benefit_vs_empty": round(net_benefit, 0),
         "fuel_cost_per_mile": fuel_cost_per_mile,
         "weight_tons": weight_tons,
-        "blurb": (
-            f"Est. +${net_benefit:,.0f} vs pure empty home "
-            f"(~${revenue:,.0f} revenue − ~${extra_empty_fuel:,.0f} fuel to shipper)"
-            if revenue > 0
-            else f"Score-only · fill rate for $ estimate · empty home ~{empty_home:.0f} mi"
-        ),
+        "miles_source": miles_source,
+        "blurb": blurb,
     }
