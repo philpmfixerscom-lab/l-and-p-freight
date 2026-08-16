@@ -1,24 +1,38 @@
-"""Quiet pipeline helpers — due follow-ups for the existing Dashboard queue.
+"""Quiet pipeline helpers — call-today queue for the existing Dashboard block.
 
+Ports the idea of main's lp_helpers/crm.py lead_needs_call_today onto this
+tree's columns (next_followup_date, last_contact) and status vocab.
 Local-first: these only read/write SQLite. Nothing is texted or emailed.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from lp_helpers.database import get_conn
 
-# Open pipeline — matches Leads status_options minus Booked / Closed / Not Interested.
-OPEN_PIPELINE_STATUSES: frozenset[str] = frozenset(
-    {"Hot", "Active", "New", "Contacted", "Quote Sent", "Negotiating", "On Hold"}
+# main crm.py ACTIVE_PIPELINE — Quoted → master's "Quote Sent"
+ACTIVE_PIPELINE_STATUSES: frozenset[str] = frozenset(
+    {"Hot", "Active", "New", "Contacted", "Quote Sent", "Negotiating"}
 )
+# Never queue these, even if a follow-up date is due. On Hold is paused, not a call.
+TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {"booked", "closed", "not interested", "on hold"}
+)
+STALE_CONTACT_DAYS = 3
+
+# Back-compat alias used by tests / older call sites
+OPEN_PIPELINE_STATUSES = ACTIVE_PIPELINE_STATUSES
 
 
-def _parse_followup_date(value: Any) -> date | None:
-    if value is None:
+def _parse_date(value: Any) -> date | None:
+    if value is None or value == "":
         return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     text = str(value).strip()
     if not text:
         return None
@@ -29,22 +43,71 @@ def _parse_followup_date(value: Any) -> date | None:
 
 
 def _as_date_text(value: date | datetime | str | None) -> str | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    parsed = _parse_followup_date(value)
-    return parsed.isoformat() if parsed else str(value).strip()[:10] or None
+    parsed = _parse_date(value)
+    return parsed.isoformat() if parsed else None
+
+
+def _is_terminal_status(status: str) -> bool:
+    return str(status or "").strip().lower() in TERMINAL_STATUSES
+
+
+def lead_needs_call_today(
+    lead: dict[str, Any],
+    *,
+    today: date | None = None,
+    stale_days: int = STALE_CONTACT_DAYS,
+) -> bool:
+    """True if the lead belongs on the Dashboard follow-up queue.
+
+    Terminal statuses (Booked / Closed / Not Interested / On Hold) are never
+    included.
+
+    Rules (OR) for everyone else — same idea as main's crm.lead_needs_call_today:
+      1. next_followup_date <= today
+      2. status in Hot/Active/New/Contacted/Quote Sent/Negotiating AND
+         last_contact older than stale_days (or null)
+      3. status Hot with null next_followup_date
+    """
+    today = today or date.today()
+    status = str(lead.get("status") or "").strip()
+    if _is_terminal_status(status):
+        return False
+
+    next_fu = _parse_date(lead.get("next_followup_date") or lead.get("next_followup_at"))
+    last = _parse_date(lead.get("last_contact"))
+
+    if next_fu is not None and next_fu <= today:
+        return True
+    if status == "Hot" and next_fu is None:
+        return True
+    if status in ACTIVE_PIPELINE_STATUSES:
+        if last is None:
+            return True
+        if last <= today - timedelta(days=stale_days):
+            return True
+    return False
+
+
+def _queue_label(lead: dict[str, Any], today: date) -> tuple[int | None, str]:
+    next_fu = _parse_date(lead.get("next_followup_date") or lead.get("next_followup_at"))
+    last = _parse_date(lead.get("last_contact"))
+    if next_fu is not None and next_fu <= today:
+        days = (today - next_fu).days
+        if days <= 0:
+            return 0, "due today"
+        if days == 1:
+            return 1, "1 day overdue"
+        return days, f"{days} days overdue"
+    if str(lead.get("status") or "") == "Hot" and next_fu is None:
+        return None, "hot — no follow-up set"
+    if last is None:
+        return None, "no last contact"
+    stale = (today - last).days
+    return None, f"stale contact ({stale}d)"
 
 
 def fetch_due_followups(conn=None, as_of: date | None = None) -> list[dict[str, Any]]:
-    """Leads whose next_followup_date is set and is today or in the past.
-
-    Includes open pipeline statuses (Hot, Active, New, Contacted, Quote Sent,
-    Negotiating, On Hold). Excludes Booked / Closed / Not Interested.
-    """
+    """Leads that lead_needs_call_today — dated due, stale contact, or Hot unset."""
     own = conn is None
     if own:
         conn = get_conn()
@@ -56,12 +119,8 @@ def fetch_due_followups(conn=None, as_of: date | None = None) -> list[dict[str, 
                    last_contact, next_followup_date, followup_type, notes,
                    commodity_focus
             FROM leads
-            WHERE next_followup_date IS NOT NULL
-              AND TRIM(next_followup_date) != ''
-              AND date(next_followup_date) <= date(?)
-            ORDER BY date(next_followup_date) ASC, priority ASC, company
-            """,
-            (day.isoformat(),),
+            ORDER BY priority ASC, company
+            """
         ).fetchall()
     finally:
         if own:
@@ -70,20 +129,20 @@ def fetch_due_followups(conn=None, as_of: date | None = None) -> list[dict[str, 
     out: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
-        if (item.get("status") or "") not in OPEN_PIPELINE_STATUSES:
+        if not lead_needs_call_today(item, today=day):
             continue
-        due = _parse_followup_date(item.get("next_followup_date"))
-        if due is None:
-            continue
-        days = (day - due).days
+        days, label = _queue_label(item, day)
         item["days_overdue"] = days
-        if days <= 0:
-            item["due_label"] = "due today"
-        elif days == 1:
-            item["due_label"] = "1 day overdue"
-        else:
-            item["due_label"] = f"{days} days overdue"
+        item["due_label"] = label
         out.append(item)
+
+    def _sort_key(r: dict[str, Any]) -> tuple:
+        hot = 0 if str(r.get("status") or "") == "Hot" else 1
+        fu = _parse_date(r.get("next_followup_date"))
+        fu_ord = fu.toordinal() if fu else 10**9
+        return (hot, fu_ord, str(r.get("company") or ""))
+
+    out.sort(key=_sort_key)
     return out
 
 

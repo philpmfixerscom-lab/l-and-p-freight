@@ -106,6 +106,36 @@ def fetch_opportunities(conn) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# Schema default is "Open"; neither tree defines another vocabulary.
+OPPORTUNITY_STATUSES: tuple[str, ...] = ("Open", "Working", "Won", "Lost")
+
+
+def update_opportunity_status(opportunity_id: int, status: str, conn=None) -> None:
+    """Advance an opportunity using the single Open/Working/Won/Lost set."""
+    if status not in OPPORTUNITY_STATUSES:
+        raise ValueError(
+            f"Unknown opportunity status {status!r}. "
+            f"Use one of: {', '.join(OPPORTUNITY_STATUSES)}"
+        )
+    own = conn is None
+    if own:
+        from lp_helpers.database import get_conn as _get_conn
+
+        conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE opportunities SET status = ? WHERE id = ?",
+            (status, opportunity_id),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"Opportunity {opportunity_id} not found")
+        if own:
+            conn.commit()
+    finally:
+        if own:
+            conn.close()
+
+
 def render_load_board_page(
     get_conn: Callable,
     clear_cache: Callable[[], None],
