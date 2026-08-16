@@ -1,4 +1,4 @@
-"""Tests for due-follow-up queries, logging, and opportunity status."""
+"""Tests for the Dashboard follow-up queue query and Leads save path."""
 
 from __future__ import annotations
 
@@ -9,12 +9,7 @@ from pathlib import Path
 import pytest
 
 import lp_helpers.database as dbmod
-from lp_helpers.load_board import (
-    OPPORTUNITY_STATUSES,
-    insert_opportunity,
-    update_opportunity_status,
-)
-from lp_helpers.pipeline import fetch_due_followups, log_lead_followup
+from lp_helpers.pipeline import OPEN_PIPELINE_STATUSES, fetch_due_followups, log_lead_followup
 
 
 def _init(tmp_path: Path):
@@ -55,17 +50,6 @@ def _init(tmp_path: Path):
             twilio_sid TEXT,
             logged_at TEXT DEFAULT (datetime('now'))
         );
-        CREATE TABLE opportunities (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source TEXT DEFAULT 'manual',
-            lane TEXT NOT NULL,
-            commodity TEXT,
-            rate TEXT,
-            contact TEXT,
-            notes TEXT,
-            status TEXT DEFAULT 'Open',
-            created_at TEXT DEFAULT (datetime('now'))
-        );
         """
     )
     today = date.today()
@@ -98,6 +82,21 @@ def _init(tmp_path: Path):
         "VALUES (6,'New Co','New',?)",
         ((today - timedelta(days=1)).isoformat(),),
     )
+    conn.execute(
+        "INSERT INTO leads (id, company, status, next_followup_date) "
+        "VALUES (7,'Booked Co','Booked',?)",
+        ((today - timedelta(days=2)).isoformat(),),
+    )
+    conn.execute(
+        "INSERT INTO leads (id, company, status, next_followup_date) "
+        "VALUES (8,'Negotiating Co','Negotiating',?)",
+        (today.isoformat(),),
+    )
+    conn.execute(
+        "INSERT INTO leads (id, company, status, next_followup_date) "
+        "VALUES (9,'Passed Co','Not Interested',?)",
+        ((today - timedelta(days=1)).isoformat(),),
+    )
     conn.commit()
     conn.close()
     return old
@@ -116,7 +115,7 @@ class TestFetchDueFollowups:
     def test_includes_overdue_and_today(self, db):
         due = fetch_due_followups()
         companies = {d["company"] for d in due}
-        assert companies == {"Sibelco", "Covia", "New Co"}
+        assert companies == {"Sibelco", "Covia", "New Co", "Negotiating Co"}
 
     def test_excludes_future_and_blank(self, db):
         due = fetch_due_followups()
@@ -124,9 +123,22 @@ class TestFetchDueFollowups:
         assert "K-T Feldspar" not in companies
         assert "Ghost Co" not in companies
 
-    def test_excludes_closed(self, db):
+    def test_excludes_closed_and_booked(self, db):
         due = fetch_due_followups()
-        assert all(d["company"] != "Closed Co" for d in due)
+        companies = {d["company"] for d in due}
+        assert "Closed Co" not in companies
+        assert "Booked Co" not in companies
+        assert "Passed Co" not in companies
+
+    def test_includes_negotiating(self, db):
+        due = fetch_due_followups()
+        assert any(d["company"] == "Negotiating Co" for d in due)
+
+    def test_open_pipeline_matches_leads_screen(self, db):
+        assert {"Hot", "Active", "New", "Contacted", "Quote Sent", "Negotiating"} <= OPEN_PIPELINE_STATUSES
+        assert "Booked" not in OPEN_PIPELINE_STATUSES
+        assert "Closed" not in OPEN_PIPELINE_STATUSES
+        assert "Not Interested" not in OPEN_PIPELINE_STATUSES
 
     def test_hot_and_active_are_visible(self, db):
         """Dashboard used to hide these by filtering New/Contacted/Quote Sent."""
@@ -206,52 +218,3 @@ class TestLogLeadFollowup:
     def test_missing_lead_raises(self, db):
         with pytest.raises(ValueError, match="not found"):
             log_lead_followup(999, next_followup_date=date.today())
-
-
-class TestOpportunityStatus:
-    def test_default_open_then_advance(self, db):
-        conn = dbmod.get_conn()
-        oid = insert_opportunity(
-            conn,
-            lane="Spruce Pine, NC → Central GA",
-            commodity="Feldspar",
-            rate="$48/ton",
-            contact="Dispatch",
-        )
-        conn.commit()
-        row = conn.execute("SELECT status FROM opportunities WHERE id=?", (oid,)).fetchone()
-        assert row["status"] == "Open"
-        update_opportunity_status(oid, "Working", conn=conn)
-        conn.commit()
-        row = conn.execute("SELECT status FROM opportunities WHERE id=?", (oid,)).fetchone()
-        conn.close()
-        assert row["status"] == "Working"
-
-    def test_won_and_lost(self, db):
-        conn = dbmod.get_conn()
-        oid = insert_opportunity(conn, lane="NC → GA", commodity="Mica", rate="$50", contact="")
-        conn.commit()
-        update_opportunity_status(oid, "Won", conn=conn)
-        conn.commit()
-        assert conn.execute("SELECT status FROM opportunities WHERE id=?", (oid,)).fetchone()["status"] == "Won"
-        update_opportunity_status(oid, "Lost", conn=conn)
-        conn.commit()
-        conn.close()
-        conn = dbmod.get_conn()
-        assert conn.execute("SELECT status FROM opportunities WHERE id=?", (oid,)).fetchone()["status"] == "Lost"
-        conn.close()
-
-    def test_rejects_unknown_status(self, db):
-        conn = dbmod.get_conn()
-        oid = insert_opportunity(conn, lane="NC → GA", commodity="Clay", rate="", contact="")
-        conn.commit()
-        conn.close()
-        with pytest.raises(ValueError, match="Unknown opportunity status"):
-            update_opportunity_status(oid, "Quoted")
-
-    def test_rejects_missing_id(self, db):
-        with pytest.raises(ValueError, match="not found"):
-            update_opportunity_status(404, "Open")
-
-    def test_status_vocabulary(self, db):
-        assert OPPORTUNITY_STATUSES == ("Open", "Working", "Won", "Lost")

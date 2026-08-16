@@ -4,20 +4,9 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 from fpdf import FPDF
 
-from lp_helpers.database import (
-    DB_PATH,
-    PRIMARY_LANE,
-    COMMODITY_OPTIONS,
-    init_db,
-    seed_assets,
-    clear_cache,
-)
+from lp_helpers.database import DB_PATH, init_db, seed_assets
 from lp_helpers.pay_engine import pay_decision
 from lp_helpers.pipeline import fetch_due_followups, log_lead_followup
-from lp_helpers.followup_templates import render_followup_panel
-from lp_helpers.load_board import render_load_board_page, fetch_opportunities
-from lp_helpers.ui_components import render_page_header, render_lane_banner
-from lp_helpers.engines import log_sms
 from routing_editor import ingest_eld_miles
 from lp_helpers.ui_theme import inject_mobile_css, render_bottom_nav, SCREENS, empty_state
 from lp_helpers.fleet import get_fleet_view
@@ -370,8 +359,8 @@ if screen == "Dashboard":
                  on_click=lambda: st.session_state.update(screen="Load Board")):
         pass
     
-    # Follow-up Queue — date-based, not status-based (Hot/Active were invisible before)
-    st.subheader("📅 Follow-ups due")
+    # Follow-up Queue — due = next_followup_date set and <= today; open pipeline statuses
+    st.subheader("📅 Follow-up Queue (Automated)")
     due_followups = fetch_due_followups()
     if due_followups:
         overdue_n = sum(1 for d in due_followups if d["days_overdue"] > 0)
@@ -381,30 +370,19 @@ if screen == "Dashboard":
             bits.append(f"{overdue_n} overdue")
         if today_n:
             bits.append(f"{today_n} due today")
-        st.info(" · ".join(bits) + ". Log a call on the Leads tab — nothing is sent automatically.")
+        st.info(" · ".join(bits) + ". Nothing is sent automatically.")
         due_view = pd.DataFrame(due_followups)[
             ["company", "phone", "status", "next_followup_date", "followup_type", "due_label"]
         ]
         st.dataframe(due_view, use_container_width=True, hide_index=True)
-        st.button(
-            "Open Leads to log a follow-up",
-            key="dash_open_leads",
-            use_container_width=True,
-            type="primary",
-            on_click=lambda: st.session_state.update(screen="Leads"),
-        )
+        queue_map = {d["company"]: d for d in due_followups}
+        queue_pick = st.selectbox("Lead from queue", list(queue_map.keys()), key="queue_follow_pick")
+        if st.button("Log follow-up on Leads", key="queue_open_leads", use_container_width=True, type="primary"):
+            st.session_state["lead_select"] = queue_pick
+            st.session_state["screen"] = "Leads"
+            st.rerun()
     else:
-        st.caption("No follow-ups due today. Set a next follow-up date on the Leads tab to see it here.")
-
-    conn = get_conn()
-    try:
-        open_opps = fetch_opportunities(conn)
-    finally:
-        conn.close()
-    if not open_opps.empty and "status" in open_opps.columns:
-        active_opps = open_opps[open_opps["status"].isin(["Open", "Working"])]
-        if not active_opps.empty:
-            st.caption(f"{len(active_opps)} open opportunit{'y' if len(active_opps) == 1 else 'ies'} on the Load Board — advance when you have news.")
+        st.success("No follow-ups due today. Excellent discipline.")
     
     # Recent Activity
     if not loads_df.empty:
@@ -421,64 +399,15 @@ if screen == "Leads":
     leads_df = pd.read_sql("SELECT * FROM leads", conn)
     conn.close()
     
-    due_followups = fetch_due_followups()
-    if due_followups:
-        st.markdown("#### Due follow-ups")
-        st.caption("Quiet list — dates that are today or past. Log a call here; nothing is auto-sent.")
-        due_view = pd.DataFrame(due_followups)[
-            ["company", "phone", "status", "next_followup_date", "followup_type", "due_label"]
-        ]
-        st.dataframe(due_view, use_container_width=True, hide_index=True)
-
-        due_map = {
-            f"{d['company']} · {d['due_label']}": d for d in due_followups
-        }
-        due_label = st.selectbox("Log follow-up for", list(due_map.keys()), key="due_follow_lead")
-        due_lead = due_map[due_label]
-        due_note = st.text_area("Note (optional)", key="due_follow_note", placeholder="Spoke with dispatch, waiting on tonnage…")
-        dc1, dc2 = st.columns(2)
-        with dc1:
-            due_next = st.date_input("Next follow-up", value=date.today() + timedelta(days=2), key="due_follow_next")
-        with dc2:
-            due_type = st.selectbox(
-                "Method",
-                ["Phone Call", "Text", "Email", "Send Quote"],
-                index=["Phone Call", "Text", "Email", "Send Quote"].index(due_lead["followup_type"])
-                if due_lead.get("followup_type") in ("Phone Call", "Text", "Email", "Send Quote")
-                else 0,
-                key="due_follow_type",
-            )
-        commodity = (due_lead.get("commodity_focus") or "Feldspar").split(",")[0].strip()
-        render_followup_panel(
-            "Copy a follow-up message (clipboard only)",
-            {
-                "contact_name": due_lead.get("contact_name") or "there",
-                "company": due_lead.get("company") or "Shipper",
-                "commodity": commodity,
-                "phone": due_lead.get("phone") or "",
-            },
-            template_keys=["feldspar_discussion", "callback_request", "bulkloads_opportunity"],
-            log_callback=lambda t, m, ch: log_sms(int(due_lead["id"]), t, m, sent_via="clipboard"),
-            panel_key=f"due_fu_{due_lead['id']}",
-        )
-        if st.button("Log follow-up", key="due_follow_save", use_container_width=True, type="primary"):
-            log_lead_followup(
-                int(due_lead["id"]),
-                next_followup_date=due_next,
-                followup_type=due_type,
-                note=due_note,
-            )
-            st.success(f"Logged follow-up for {due_lead['company']}. Next: {due_next}.")
-            st.rerun()
-    else:
-        st.caption("No follow-ups due today or overdue.")
-
     st.dataframe(leads_df[['company', 'phone', 'status', 'last_contact', 'next_followup_date', 'followup_type']], use_container_width=True, hide_index=True)
     
     st.divider()
     st.subheader("Update Lead & Set Next Follow-up")
     
-    selected = st.selectbox("Select Lead", leads_df['company'].tolist())
+    companies = leads_df['company'].tolist()
+    preset = st.session_state.pop("lead_select", None)
+    default_idx = companies.index(preset) if preset in companies else 0
+    selected = st.selectbox("Select Lead", companies, index=default_idx)
     row = leads_df[leads_df['company'] == selected].iloc[0]
     
     status_options = ["New", "Contacted", "Quote Sent", "Booked", "On Hold", "Not Interested", "Hot", "Active", "Negotiating", "Closed"]
@@ -621,17 +550,6 @@ if screen == "Log Load":
     if st.button("📲 Open Driver App", key="open_driver_app", use_container_width=True,
                  on_click=lambda: st.session_state.update(screen="Driver")):
         pass
-
-# ========== LOAD BOARD (opportunities) ==========
-if screen == "Load Board":
-    render_load_board_page(
-        get_conn=get_conn,
-        clear_cache=clear_cache,
-        commodity_options=COMMODITY_OPTIONS,
-        primary_lane=PRIMARY_LANE,
-        render_page_header=render_page_header,
-        render_lane_banner=render_lane_banner,
-    )
 
 # ========== RATE CALCULATOR ==========
 if screen == "Rate Calculator":

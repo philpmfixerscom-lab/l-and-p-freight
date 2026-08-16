@@ -106,36 +106,6 @@ def fetch_opportunities(conn) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-# Schema default is "Open"; no other opportunity statuses exist in the codebase.
-OPPORTUNITY_STATUSES: tuple[str, ...] = ("Open", "Working", "Won", "Lost")
-
-
-def update_opportunity_status(opportunity_id: int, status: str, conn=None) -> None:
-    """Advance an opportunity using the single Open/Working/Won/Lost set."""
-    if status not in OPPORTUNITY_STATUSES:
-        raise ValueError(
-            f"Unknown opportunity status {status!r}. "
-            f"Use one of: {', '.join(OPPORTUNITY_STATUSES)}"
-        )
-    own = conn is None
-    if own:
-        from lp_helpers.database import get_conn as _get_conn
-
-        conn = _get_conn()
-    try:
-        cur = conn.execute(
-            "UPDATE opportunities SET status = ? WHERE id = ?",
-            (status, opportunity_id),
-        )
-        if cur.rowcount == 0:
-            raise ValueError(f"Opportunity {opportunity_id} not found")
-        if own:
-            conn.commit()
-    finally:
-        if own:
-            conn.close()
-
-
 def render_load_board_page(
     get_conn: Callable,
     clear_cache: Callable[[], None],
@@ -217,32 +187,6 @@ def render_load_board_page(
         display_cols = ["lane", "commodity", "rate", "contact", "status", "created_at"]
         show_cols = [c for c in display_cols if c in opps_df.columns]
         st.dataframe(opps_df[show_cols], use_container_width=True, hide_index=True)
-
-        st.markdown("#### Advance opportunity")
-        st.caption("Open → Working → Won or Lost. Status stays in this app — nothing is sent.")
-        opp_labels = {
-            f"#{int(r['id'])} · {r.get('commodity') or 'Load'} · {r['lane']} ({r.get('status') or 'Open'})": int(r["id"])
-            for _, r in opps_df.iterrows()
-        }
-        pick_label = st.selectbox("Opportunity", list(opp_labels.keys()), key="opp_status_pick")
-        current = opps_df[opps_df["id"] == opp_labels[pick_label]].iloc[0]
-        cur_status = current.get("status") or "Open"
-        new_status = st.selectbox(
-            "Status",
-            list(OPPORTUNITY_STATUSES),
-            index=OPPORTUNITY_STATUSES.index(cur_status) if cur_status in OPPORTUNITY_STATUSES else 0,
-            key="opp_status_value",
-        )
-        if st.button("Update opportunity status", key="opp_status_btn", use_container_width=True, type="primary"):
-            try:
-                with closing(get_conn()) as conn:
-                    update_opportunity_status(opp_labels[pick_label], new_status, conn=conn)
-                    conn.commit()
-                clear_cache()
-                st.success(f"Opportunity #{opp_labels[pick_label]} → {new_status}")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Could not update status: {exc}")
 
         with st.expander("Import market listing to opportunities"):
             labels = [f"{r['commodity']} — {r['lane']}" for r in NC_GA_MARKET_INTEL]

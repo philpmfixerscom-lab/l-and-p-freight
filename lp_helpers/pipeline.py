@@ -1,4 +1,4 @@
-"""Quiet pipeline helpers — due follow-ups and opportunity status.
+"""Quiet pipeline helpers — due follow-ups for the existing Dashboard queue.
 
 Local-first: these only read/write SQLite. Nothing is texted or emailed.
 """
@@ -10,8 +10,10 @@ from typing import Any
 
 from lp_helpers.database import get_conn
 
-# Closed-out leads stay off the due list even if a stale date remains.
-_INACTIVE_LEAD_STATUSES = frozenset({"Closed", "Not Interested"})
+# Open pipeline — matches Leads status_options minus Booked / Closed / Not Interested.
+OPEN_PIPELINE_STATUSES: frozenset[str] = frozenset(
+    {"Hot", "Active", "New", "Contacted", "Quote Sent", "Negotiating", "On Hold"}
+)
 
 
 def _parse_followup_date(value: Any) -> date | None:
@@ -38,11 +40,10 @@ def _as_date_text(value: date | datetime | str | None) -> str | None:
 
 
 def fetch_due_followups(conn=None, as_of: date | None = None) -> list[dict[str, Any]]:
-    """Leads whose next_followup_date is today or in the past.
+    """Leads whose next_followup_date is set and is today or in the past.
 
-    Ignores blank dates. Does not filter by Hot/Active/New — seed data uses
-    Hot while the schema default is Active, and any scheduled date should show.
-    Closed / Not Interested leads are omitted so the list stays quiet.
+    Includes open pipeline statuses (Hot, Active, New, Contacted, Quote Sent,
+    Negotiating, On Hold). Excludes Booked / Closed / Not Interested.
     """
     own = conn is None
     if own:
@@ -69,7 +70,7 @@ def fetch_due_followups(conn=None, as_of: date | None = None) -> list[dict[str, 
     out: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
-        if (item.get("status") or "") in _INACTIVE_LEAD_STATUSES:
+        if (item.get("status") or "") not in OPEN_PIPELINE_STATUSES:
             continue
         due = _parse_followup_date(item.get("next_followup_date"))
         if due is None:
