@@ -4,8 +4,15 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 from fpdf import FPDF
 
-from lp_helpers.database import DB_PATH, init_db, seed_assets
+from lp_helpers.database import DB_PATH, PRIMARY_LANE, init_db, seed_assets
 from lp_helpers.pay_engine import pay_decision
+from lp_helpers.pipeline import fetch_due_followups, log_lead_followup
+from lp_helpers.load_board import (
+    fetch_opportunities,
+    insert_opportunity,
+    update_opportunity_status,
+    OPPORTUNITY_STATUSES,
+)
 from routing_editor import ingest_eld_miles
 from lp_helpers.ui_theme import inject_mobile_css, render_bottom_nav, SCREENS, empty_state
 from lp_helpers.fleet import get_fleet_view
@@ -358,20 +365,80 @@ if screen == "Dashboard":
                  on_click=lambda: st.session_state.update(screen="Load Board")):
         pass
     
-    # Follow-up Queue
+    # Follow-up Queue — same idea as main crm.lead_needs_call_today
     st.subheader("📅 Follow-up Queue (Automated)")
-    today = date.today()
-    due_leads = leads_df[
-        (leads_df['next_followup_date'].notna()) & 
-        (leads_df['next_followup_date'] != '') &
-        (leads_df['status'].isin(['New', 'Contacted', 'Quote Sent']))
-    ]
-    
-    if not due_leads.empty:
-        st.warning(f"**{len(due_leads)} leads require follow-up**")
-        st.dataframe(due_leads[['company', 'phone', 'status', 'next_followup_date', 'followup_type']], use_container_width=True, hide_index=True)
+    due_followups = fetch_due_followups()
+    if due_followups:
+        overdue_n = sum(1 for d in due_followups if (d.get("days_overdue") or 0) > 0)
+        today_n = sum(1 for d in due_followups if d.get("days_overdue") == 0)
+        other_n = len(due_followups) - overdue_n - today_n
+        bits = []
+        if overdue_n:
+            bits.append(f"{overdue_n} overdue")
+        if today_n:
+            bits.append(f"{today_n} due today")
+        if other_n:
+            bits.append(f"{other_n} hot/stale")
+        st.info(" · ".join(bits) + ". Nothing is sent automatically.")
+        due_view = pd.DataFrame(due_followups)[
+            ["company", "phone", "status", "last_contact", "next_followup_date", "followup_type", "due_label"]
+        ]
+        st.dataframe(due_view, use_container_width=True, hide_index=True)
+        queue_map = {d["company"]: d for d in due_followups}
+        queue_pick = st.selectbox("Lead from queue", list(queue_map.keys()), key="queue_follow_pick")
+        if st.button("Log follow-up on Leads", key="queue_open_leads", use_container_width=True, type="primary"):
+            st.session_state["lead_select"] = queue_pick
+            st.session_state["screen"] = "Leads"
+            st.rerun()
     else:
         st.success("No follow-ups due today. Excellent discipline.")
+
+    with st.expander("Opportunities", expanded=False):
+        st.caption("Open → Working → Won or Lost. Status stays in this app.")
+        conn = get_conn()
+        try:
+            opps_df = fetch_opportunities(conn)
+        finally:
+            conn.close()
+        if opps_df.empty:
+            st.caption("None logged yet.")
+        else:
+            show_cols = [c for c in ("lane", "commodity", "rate", "contact", "status") if c in opps_df.columns]
+            st.dataframe(opps_df[show_cols], use_container_width=True, hide_index=True)
+            opp_labels = {
+                f"#{int(r['id'])} · {r.get('commodity') or 'Load'} · {r['lane']} ({r.get('status') or 'Open'})": int(r["id"])
+                for _, r in opps_df.iterrows()
+            }
+            pick_label = st.selectbox("Opportunity", list(opp_labels.keys()), key="dash_opp_pick")
+            current = opps_df[opps_df["id"] == opp_labels[pick_label]].iloc[0]
+            cur_status = current.get("status") or "Open"
+            new_opp_status = st.selectbox(
+                "Status",
+                list(OPPORTUNITY_STATUSES),
+                index=OPPORTUNITY_STATUSES.index(cur_status) if cur_status in OPPORTUNITY_STATUSES else 0,
+                key="dash_opp_status",
+            )
+            if st.button("Update opportunity status", key="dash_opp_btn", use_container_width=True, type="primary"):
+                update_opportunity_status(opp_labels[pick_label], new_opp_status)
+                st.success(f"Opportunity #{opp_labels[pick_label]} → {new_opp_status}")
+                st.rerun()
+        lane_in = st.text_input(
+            "Lane",
+            value=f"{PRIMARY_LANE['origin']} → {PRIMARY_LANE['destination']}",
+            key="dash_opp_lane",
+        )
+        if st.button("Log opportunity", key="dash_opp_add", use_container_width=True):
+            if not lane_in.strip():
+                st.error("Lane is required.")
+            else:
+                conn = get_conn()
+                try:
+                    insert_opportunity(conn, lane=lane_in.strip(), commodity="Feldspar", rate="", contact="")
+                    conn.commit()
+                finally:
+                    conn.close()
+                st.success("Opportunity saved as Open.")
+                st.rerun()
     
     # Recent Activity
     if not loads_df.empty:
@@ -393,7 +460,10 @@ if screen == "Leads":
     st.divider()
     st.subheader("Update Lead & Set Next Follow-up")
     
-    selected = st.selectbox("Select Lead", leads_df['company'].tolist())
+    companies = leads_df['company'].tolist()
+    preset = st.session_state.pop("lead_select", None)
+    default_idx = companies.index(preset) if preset in companies else 0
+    selected = st.selectbox("Select Lead", companies, index=default_idx)
     row = leads_df[leads_df['company'] == selected].iloc[0]
     
     status_options = ["New", "Contacted", "Quote Sent", "Booked", "On Hold", "Not Interested", "Hot", "Active", "Negotiating", "Closed"]
@@ -409,15 +479,13 @@ if screen == "Leads":
         f_type = st.selectbox("Follow-up Method", ["Phone Call", "Text", "Email", "Send Quote"])
     
     if st.button("Save Update & Schedule Follow-up"):
-        conn = get_conn()
-        c = conn.cursor()
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        prior_notes = row['notes'] if pd.notna(row['notes']) else ""
-        combined = f"[{ts}] {new_note}\n{prior_notes}" if new_note else prior_notes
-        c.execute("""UPDATE leads SET status=?, notes=?, last_contact=?, next_followup_date=?, followup_type=? WHERE id=?""",
-                  (new_status, combined, ts, str(next_date), f_type, int(row['id'])))
-        conn.commit()
-        conn.close()
+        log_lead_followup(
+            int(row["id"]),
+            next_followup_date=next_date,
+            followup_type=f_type,
+            note=new_note,
+            status=new_status,
+        )
         st.success("Lead updated and follow-up scheduled.")
         st.rerun()
 
