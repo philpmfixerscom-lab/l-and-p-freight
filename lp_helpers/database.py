@@ -1047,12 +1047,18 @@ def init_db() -> None:
 
         if conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0] == 0:
             for lead in SEED_LEADS:
+                next_fu = lead.get("next_followup_date")
+                fu_type = lead.get("followup_type")
+                # Fresh DB: Sibelco is due so the follow-up queue is visible on day one.
+                if lead["company"] == "Sibelco" and not next_fu:
+                    next_fu = (date.today() - timedelta(days=1)).isoformat()
+                    fu_type = fu_type or "Phone Call"
                 conn.execute(
                     """
                     INSERT INTO leads (
                         company, contact_name, phone, commodity_focus,
-                        lane_notes, status, priority
-                    ) VALUES (?,?,?,?,?,?,?)
+                        lane_notes, status, priority, next_followup_date, followup_type
+                    ) VALUES (?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         lead["company"],
@@ -1062,6 +1068,8 @@ def init_db() -> None:
                         lead["lane_notes"],
                         lead["status"],
                         lead["priority"],
+                        next_fu,
+                        fu_type,
                     ),
                 )
 
